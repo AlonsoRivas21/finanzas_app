@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'finanzas.db');
-    return openDatabase(path, version: 2,
+    return openDatabase(path, version: 3,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -39,6 +39,12 @@ class DatabaseHelper {
         sincronizado INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('''
+      CREATE TABLE movimientos_eliminados (
+        id TEXT PRIMARY KEY,
+        eliminado_at TEXT NOT NULL
+      )
+    ''');
     await db.execute('CREATE INDEX idx_fecha ON movimientos(fecha DESC)');
     await db.execute('CREATE INDEX idx_mes_anio ON movimientos(mes, anio)');
     await db.execute('CREATE INDEX idx_cuenta ON movimientos(cuenta)');
@@ -51,7 +57,17 @@ class DatabaseHelper {
       await db.execute(
           "UPDATE movimientos SET anio = CAST(strftime('%Y', fecha) AS INTEGER)");
     }
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS movimientos_eliminados (
+          id TEXT PRIMARY KEY,
+          eliminado_at TEXT NOT NULL
+        )
+      ''');
+    }
   }
+
+  // ── CRUD movimientos ──────────────────────────────────────────────────────
 
   Future<void> insertMovimiento(Movimiento m) async {
     final database = await db;
@@ -78,7 +94,28 @@ class DatabaseHelper {
   Future<void> deleteMovimiento(String id) async {
     final database = await db;
     await database.delete('movimientos', where: 'id = ?', whereArgs: [id]);
+    // Registrar en eliminados para sincronizar después
+    await database.insert(
+      'movimientos_eliminados',
+      {'id': id, 'eliminado_at': DateTime.now().toIso8601String()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
+
+  // ── Eliminados pendientes ─────────────────────────────────────────────────
+
+  Future<List<String>> getEliminadosPendientes() async {
+    final database = await db;
+    final rows = await database.query('movimientos_eliminados');
+    return rows.map((r) => r['id'] as String).toList();
+  }
+
+  Future<void> limpiarEliminados() async {
+    final database = await db;
+    await database.delete('movimientos_eliminados');
+  }
+
+  // ── Consultas ─────────────────────────────────────────────────────────────
 
   Future<List<Movimiento>> getMovimientos({
     int? mes, int? anio, String? cuenta,
@@ -107,7 +144,6 @@ class DatabaseHelper {
       limit: limit,
       offset: offset,
     );
-
     return rows.map(Movimiento.fromMap).toList();
   }
 
@@ -137,7 +173,7 @@ class DatabaseHelper {
     return {'ingresos': ingresos, 'egresos': egresos};
   }
 
-  Future<Map<String, double>> getSaldosPorCuenta() async {
+  Future<Map<String, double>> getSaldosPorCuentaLocal() async {
     final database = await db;
     final saldos = await SaldosService.getSaldosIniciales();
     final result = await database.rawQuery('''
@@ -188,7 +224,6 @@ class DatabaseHelper {
     ''', [mes, anio]);
   }
 
-  /// Agrupa ingresos y egresos por semana del mes (S1, S2, S3, S4)
   Future<List<Map<String, dynamic>>> getResumenPorSemana(
       int mes, int anio) async {
     final database = await db;
@@ -209,7 +244,6 @@ class DatabaseHelper {
       ORDER BY semana
     ''', [mes, anio]);
 
-    // Construir lista de 4 semanas
     final semanas = List.generate(4, (i) =>
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
 
@@ -224,7 +258,6 @@ class DatabaseHelper {
       }
     }
 
-    // Solo devolver semanas con datos
     return semanas.where((s) =>
         (s['ingresos'] as double) > 0 ||
         (s['egresos'] as double) > 0).toList();
@@ -263,5 +296,6 @@ class DatabaseHelper {
   Future<void> clearAll() async {
     final database = await db;
     await database.delete('movimientos');
+    await database.delete('movimientos_eliminados');
   }
 }

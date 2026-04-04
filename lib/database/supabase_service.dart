@@ -3,14 +3,14 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
 import 'database_helper.dart';
+import 'saldos_service.dart';
+import 'saldos_cuentas_service.dart';
 
 class SupabaseService {
   static final _client = Supabase.instance.client;
 
   static User? get usuarioActual => _client.auth.currentUser;
   static bool get estaAutenticado => usuarioActual != null;
-
-  // ── Auth ──────────────────────────────────────────────────────────────────
 
   static Future<void> registrar(String email, String password) async {
     final res = await _client.auth.signUp(email: email, password: password);
@@ -31,33 +31,65 @@ class SupabaseService {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
     final db = DatabaseHelper();
+
+    // 1. Subir movimientos pendientes
     final pendientes = await db.getNoSincronizados();
-    if (pendientes.isEmpty) return 0;
+    if (pendientes.isNotEmpty) {
+      final userId = usuarioActual!.id;
+      final datos = pendientes.map((m) {
+        final map = m.toMap();
+        map['usuario_id'] = userId;
+        map.remove('sincronizado');
+        return map;
+      }).toList();
+      await _client.from('movimientos').upsert(datos, onConflict: 'id');
+      await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
+    }
 
-    final userId = usuarioActual!.id;
-    final datos = pendientes.map((m) {
-      final map = m.toMap();
-      map['usuario_id'] = userId;
-      map.remove('sincronizado');
-      return map;
-    }).toList();
+    // 2. Aplicar eliminaciones pendientes en Supabase
+    final eliminados = await db.getEliminadosPendientes();
+    if (eliminados.isNotEmpty) {
+      // Registrar en tabla movimientos_eliminados de Supabase
+      final rows = eliminados.map((id) => {
+        'usuario_id': usuarioActual!.id,
+        'movimiento_id': id,
+        'eliminado_at': DateTime.now().toIso8601String(),
+      }).toList();
+      await _client.from('movimientos_eliminados')
+          .upsert(rows, onConflict: 'usuario_id,movimiento_id');
 
-    await _client.from('movimientos').upsert(datos, onConflict: 'id');
-    await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
+      // Borrar de movimientos en Supabase
+      for (final id in eliminados) {
+        await _client.from('movimientos').delete().eq('id', id);
+      }
+
+      // Limpiar lista local de eliminados
+      await db.limpiarEliminados();
+    }
+
+    // 3. Subir saldos iniciales
+    await SaldosService.subirSaldos();
+
+    // 4. Recalcular saldos_cuentas en Supabase con historial completo
+    await SaldosCuentasService.recalcularDesdeHistorial();
+
     return pendientes.length;
   }
 
   static Future<int> bajar() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
+    final db = DatabaseHelper();
+
+    // 1. Bajar movimientos
     final response = await _client
         .from('movimientos')
         .select()
-        .eq('usuario_id', usuarioActual!.id);
+        .eq('usuario_id', usuarioActual!.id)
+        .order('fecha', ascending: false)
+        .limit(5000);
 
-    if ((response as List).isEmpty) return 0;
-
-    final movimientos = response.map((row) => Movimiento.fromMap({
+    final movimientos = (response as List).map((row) => Movimiento.fromMap({
       'id':          row['id'],
       'fecha':       row['fecha'],
       'tipo':        row['tipo'],
@@ -70,10 +102,14 @@ class SupabaseService {
       'sincronizado': 1,
     })).toList();
 
-    final db = DatabaseHelper();
-    // Limpiar primero para evitar duplicados huérfanos
     await db.clearAll();
-    await db.insertMovimientos(movimientos);
+    if (movimientos.isNotEmpty) {
+      await db.insertMovimientos(movimientos);
+    }
+
+    // 2. Bajar saldos iniciales
+    await SaldosService.bajarSaldos();
+
     return movimientos.length;
   }
 
@@ -82,13 +118,14 @@ class SupabaseService {
 
     final db = DatabaseHelper();
     final pendientes = await db.getNoSincronizados();
+    final eliminados = await db.getEliminadosPendientes();
 
-    if (pendientes.isNotEmpty) {
-      // Hay datos sin subir — subir primero
+    if (pendientes.isNotEmpty || eliminados.isNotEmpty) {
+      // Hay cambios locales — subir
       final cantidad = await subir();
       return (accion: 'subida', cantidad: cantidad);
     } else {
-      // Todo sincronizado o vacío — bajar desde la nube
+      // Sin cambios locales — bajar respaldo
       final cantidad = await bajar();
       return (accion: 'bajada', cantidad: cantidad);
     }

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'movimiento.dart';
 import '../database/data_repository.dart';
+import '../database/database_helper.dart';
+import '../database/saldos_cuentas_service.dart';
 
 class MovimientosProvider extends ChangeNotifier {
   final _repo = DataRepository();
@@ -86,6 +88,8 @@ class MovimientosProvider extends ChangeNotifier {
       sincronizado: false,
     );
     await _repo.insertMovimiento(m);
+    // Actualizar saldo local inmediatamente
+    await SaldosCuentasService.aplicarMovimientoLocal(m);
     await cargar();
   }
 
@@ -127,24 +131,52 @@ class MovimientosProvider extends ChangeNotifier {
     );
 
     await _repo.insertMovimientos([egreso, ingreso]);
+    await SaldosCuentasService.aplicarMovimientoLocal(egreso);
+    await SaldosCuentasService.aplicarMovimientoLocal(ingreso);
     await cargar();
   }
 
-  Future<void> editar(Movimiento m) async {
-    await _repo.updateMovimiento(m.copyWith(sincronizado: false));
+  Future<void> editar(Movimiento nuevo) async {
+    final anterior = _movimientos.firstWhere(
+      (m) => m.id == nuevo.id,
+      orElse: () => nuevo,
+    );
+    await _repo.updateMovimiento(nuevo.copyWith(sincronizado: false));
+    await SaldosCuentasService.actualizarPorEdicionLocal(
+        anterior: anterior, nuevo: nuevo);
     await cargar();
   }
 
   Future<void> eliminar(String id) async {
+    final movimiento = _movimientos.where((m) => m.id == id).firstOrNull;
+
+    // Borrar de SQLite — queda registrado en movimientos_eliminados automáticamente
     await _repo.deleteMovimiento(id);
+
+    // Revertir saldo local
+    if (movimiento != null) {
+      await SaldosCuentasService.revertirMovimientoLocal(movimiento);
+      if (id.endsWith('_out') || id.endsWith('_in')) {
+        final base = id.replaceAll('_out', '').replaceAll('_in', '');
+        final par = _movimientos
+            .where((m) => m.id == '${base}_out' || m.id == '${base}_in')
+            .where((m) => m.id != id)
+            .firstOrNull;
+        if (par != null) {
+          await _repo.deleteMovimiento(par.id);
+          await SaldosCuentasService.revertirMovimientoLocal(par);
+        }
+      }
+    }
     await cargar();
   }
 
   Future<Map<String, double>> getResumenMes() async =>
       _repo.getResumenMes(_mesActual, _anioActual);
 
+  /// Saldos calculados localmente — funciona sin internet
   Future<Map<String, double>> getSaldosPorCuenta() async =>
-      _repo.getSaldosPorCuenta();
+      DatabaseHelper().getSaldosPorCuentaLocal();
 
   Future<List<Map<String, dynamic>>> getGastosPorCategoria() async =>
       _repo.getGastosPorCategoria(_mesActual, _anioActual);
