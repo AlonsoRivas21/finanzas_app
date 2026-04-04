@@ -17,7 +17,6 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
   bool _sincronizando = false;
 
   Future<void> _sincronizar() async {
-    // Si no está autenticado, abrir login primero
     if (!SupabaseService.estaAutenticado) {
       final resultado = await Navigator.push<bool>(
         context,
@@ -30,8 +29,11 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
 
     try {
       final res = await SupabaseService.sincronizar();
+
       if (mounted) {
-        context.read<MovimientosProvider>().cargar();
+        // Forzar recarga completa del provider después de sincronizar
+        final prov = context.read<MovimientosProvider>();
+        await prov.cargar();
 
         final esSubida = res.accion == 'subida';
         ScaffoldMessenger.of(context).showSnackBar(
@@ -42,11 +44,13 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
                 color: Colors.white, size: 18,
               ),
               const SizedBox(width: 8),
-              Text(res.cantidad == 0
-                  ? 'Todo está sincronizado'
-                  : esSubida
-                      ? '${res.cantidad} movimientos subidos a la nube'
-                      : '${res.cantidad} movimientos descargados'),
+              Expanded(
+                child: Text(res.cantidad == 0
+                    ? 'Todo está sincronizado'
+                    : esSubida
+                        ? '${res.cantidad} movimientos subidos a la nube'
+                        : '${res.cantidad} movimientos descargados'),
+              ),
             ]),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 3),
@@ -79,14 +83,10 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: autenticado
-                ? Colors.green.shade50
-                : Colors.grey.shade50,
+            color: autenticado ? Colors.green.shade50 : Colors.grey.shade50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: autenticado
-                  ? Colors.green.shade200
-                  : Colors.grey.shade300,
+              color: autenticado ? Colors.green.shade200 : Colors.grey.shade300,
             ),
           ),
           child: Row(children: [
@@ -113,10 +113,9 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
               TextButton(
                 onPressed: () async {
                   await SupabaseService.cerrarSesion();
-                  setState(() {});
+                  if (mounted) setState(() {});
                 },
-                child: const Text('Salir',
-                    style: TextStyle(fontSize: 12)),
+                child: const Text('Salir', style: TextStyle(fontSize: 12)),
               ),
           ]),
         ),
@@ -137,13 +136,11 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
               : autenticado
                   ? 'Sincronizar'
                   : 'Iniciar sesión y sincronizar'),
-          style: FilledButton.styleFrom(
-              padding: const EdgeInsets.all(16)),
+          style: FilledButton.styleFrom(padding: const EdgeInsets.all(16)),
         ),
 
         const SizedBox(height: 8),
 
-        // Explicación
         Text(
           autenticado
               ? 'Si tienes datos locales los sube. Si no, los descarga de la nube.'
