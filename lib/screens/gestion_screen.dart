@@ -21,6 +21,8 @@ class _GestionScreenState extends State<GestionScreen>
   void initState() {
     super.initState();
     _tab = TabController(length: 2, vsync: this);
+    // Limpiar caché al entrar para mostrar datos frescos
+    CatalogoService.limpiarCache();
   }
 
   @override
@@ -74,16 +76,20 @@ class _CuentasTabState extends State<_CuentasTab> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
+    // Siempre forceRefresh para evitar caché desactualizada
     final cuentas = await CatalogoService.getCuentas(forceRefresh: true);
     setState(() { _cuentas = cuentas; _cargando = false; });
   }
 
-  Future<void> _mostrarFormCuenta({CuentaModel? cuenta}) async {
-    final resultado = await showDialog<bool>(
+  Future<void> _mostrarForm({CuentaModel? cuenta}) async {
+    final res = await showDialog<bool>(
       context: context,
       builder: (_) => _FormCuentaDialog(cuenta: cuenta),
     );
-    if (resultado == true) _cargar();
+    if (res == true) {
+      CatalogoService.limpiarCache();
+      _cargar();
+    }
   }
 
   Future<void> _eliminar(CuentaModel cuenta) async {
@@ -91,17 +97,22 @@ class _CuentasTabState extends State<_CuentasTab> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar cuenta'),
-        content: Text('¿Eliminar "${cuenta.nombre}"? Los movimientos existentes se conservan.'),
+        content: Text(
+            '¿Eliminar "${cuenta.nombre}"? Los movimientos existentes se conservan.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Eliminar',
+                  style: TextStyle(color: Colors.red))),
         ],
       ),
     );
     if (confirmado == true) {
       await CatalogoService.eliminarCuenta(cuenta.id);
+      CatalogoService.limpiarCache();
       _cargar();
     }
   }
@@ -120,9 +131,10 @@ class _CuentasTabState extends State<_CuentasTab> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_cuentas.length} cuentas activas',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                        style: TextStyle(
+                            color: Colors.grey.shade600, fontSize: 13)),
                     FilledButton.icon(
-                      onPressed: () => _mostrarFormCuenta(),
+                      onPressed: () => _mostrarForm(),
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Nueva cuenta'),
                     ),
@@ -136,10 +148,16 @@ class _CuentasTabState extends State<_CuentasTab> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
                     final c = _cuentas[i];
-                    final color = c.esTarjeta ? Colors.red
-                        : c.esAhorro ? Colors.teal : Colors.blue;
-                    final icono = c.esTarjeta ? Icons.credit_card
-                        : c.esAhorro ? Icons.savings : Icons.account_balance;
+                    final color = c.esTarjeta
+                        ? Colors.red
+                        : c.esAhorro
+                            ? Colors.teal
+                            : Colors.blue;
+                    final icono = c.esTarjeta
+                        ? Icons.credit_card
+                        : c.esAhorro
+                            ? Icons.savings
+                            : Icons.account_balance;
 
                     return Container(
                       decoration: BoxDecoration(
@@ -152,17 +170,20 @@ class _CuentasTabState extends State<_CuentasTab> {
                           child: Icon(icono, color: color, size: 20),
                         ),
                         title: Text(c.nombre,
-                            style: const TextStyle(fontWeight: FontWeight.w500)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w500)),
                         subtitle: Text(
                           '${_tipoLabel(c.tipo)} · Saldo inicial: \$${fmt.format(c.saldoInicial)}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined, size: 18),
-                              onPressed: () => _mostrarFormCuenta(cuenta: c),
+                              icon:
+                                  const Icon(Icons.edit_outlined, size: 18),
+                              onPressed: () => _mostrarForm(cuenta: c),
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete_outline,
@@ -191,7 +212,7 @@ class _CuentasTabState extends State<_CuentasTab> {
   }
 }
 
-// ── Formulario de Cuenta ──────────────────────────────────────────────────────
+// ── Formulario Cuenta ─────────────────────────────────────────────────────────
 
 class _FormCuentaDialog extends StatefulWidget {
   final CuentaModel? cuenta;
@@ -216,7 +237,8 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
     if (esEdicion) {
       _nombreCtrl.text = widget.cuenta!.nombre;
       _saldoCtrl.text = widget.cuenta!.saldoInicial == 0
-          ? '' : widget.cuenta!.saldoInicial.toString();
+          ? ''
+          : widget.cuenta!.saldoInicial.toString();
       _tipo = widget.cuenta!.tipo;
     }
   }
@@ -232,30 +254,27 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _guardando = true);
 
-    final nombre = _nombreCtrl.text.trim();
-    final saldo = double.tryParse(_saldoCtrl.text.replaceAll(',', '.')) ?? 0.0;
+    final nombre = _nombreCtrl.text.trim().toUpperCase();
+    final saldo =
+        double.tryParse(_saldoCtrl.text.replaceAll(',', '.')) ?? 0.0;
 
     try {
       if (esEdicion) {
         await CatalogoService.actualizarCuenta(
           widget.cuenta!.copyWith(
-            nombre: nombre.toUpperCase(),
-            tipo: _tipo,
-            saldoInicial: saldo,
-          ),
+              nombre: nombre, tipo: _tipo, saldoInicial: saldo),
         );
       } else {
         await CatalogoService.crearCuenta(
-          nombre: nombre,
-          tipo: _tipo,
-          saldoInicial: saldo,
-        );
+            nombre: nombre, tipo: _tipo, saldoInicial: saldo);
       }
+      CatalogoService.limpiarCache();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -273,19 +292,16 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
           TextFormField(
             controller: _nombreCtrl,
             decoration: const InputDecoration(
-              labelText: 'Nombre de la cuenta',
-              border: OutlineInputBorder(),
-            ),
+                labelText: 'Nombre', border: OutlineInputBorder()),
             textCapitalization: TextCapitalization.characters,
-            validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Requerido' : null,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _tipo,
             decoration: const InputDecoration(
-              labelText: 'Tipo',
-              border: OutlineInputBorder(),
-            ),
+                labelText: 'Tipo', border: OutlineInputBorder()),
             items: const [
               DropdownMenuItem(value: 'efectivo', child: Text('Efectivo')),
               DropdownMenuItem(value: 'debito',   child: Text('Débito')),
@@ -310,14 +326,15 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancelar'),
-        ),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar')),
         FilledButton(
           onPressed: _guardando ? null : _guardar,
           child: _guardando
-              ? const SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              ? const SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
               : Text(esEdicion ? 'Guardar' : 'Crear'),
         ),
       ],
@@ -355,7 +372,10 @@ class _CategoriasTabState extends State<_CategoriasTab> {
       context: context,
       builder: (_) => _FormCategoriaDialog(categoria: cat),
     );
-    if (res == true) _cargar();
+    if (res == true) {
+      CatalogoService.limpiarCache();
+      _cargar();
+    }
   }
 
   Future<void> _eliminar(CategoriaModel cat) async {
@@ -365,9 +385,11 @@ class _CategoriasTabState extends State<_CategoriasTab> {
         title: const Text('Eliminar categoría'),
         content: Text('¿Eliminar "${cat.nombre}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(context, true),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
               child: const Text('Eliminar',
                   style: TextStyle(color: Colors.red))),
         ],
@@ -375,6 +397,7 @@ class _CategoriasTabState extends State<_CategoriasTab> {
     );
     if (confirmado == true) {
       await CatalogoService.eliminarCategoria(cat.id);
+      CatalogoService.limpiarCache();
       _cargar();
     }
   }
@@ -428,11 +451,9 @@ class _CategoriasTabState extends State<_CategoriasTab> {
                         title: Text(cat.nombre,
                             style: const TextStyle(
                                 fontWeight: FontWeight.w500)),
-                        subtitle: Text(
-                          _tipoLabel(cat.tipo),
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500),
-                        ),
+                        subtitle: Text(_tipoLabel(cat.tipo),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade500)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -492,7 +513,7 @@ class _CategoriasTabState extends State<_CategoriasTab> {
   }
 }
 
-// ── Formulario de Categoría ───────────────────────────────────────────────────
+// ── Formulario Categoría ──────────────────────────────────────────────────────
 
 class _FormCategoriaDialog extends StatefulWidget {
   final CategoriaModel? categoria;
@@ -570,11 +591,13 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
           icono: _icono,
         );
       }
+      CatalogoService.limpiarCache();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -592,19 +615,16 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
           TextFormField(
             controller: _nombreCtrl,
             decoration: const InputDecoration(
-              labelText: 'Nombre',
-              border: OutlineInputBorder(),
-            ),
+                labelText: 'Nombre', border: OutlineInputBorder()),
             textCapitalization: TextCapitalization.characters,
-            validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Requerido' : null,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _tipo,
             decoration: const InputDecoration(
-              labelText: 'Aplica a',
-              border: OutlineInputBorder(),
-            ),
+                labelText: 'Aplica a', border: OutlineInputBorder()),
             items: const [
               DropdownMenuItem(value: 'egreso',  child: Text('Solo egresos')),
               DropdownMenuItem(value: 'ingreso', child: Text('Solo ingresos')),
@@ -613,7 +633,6 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
             onChanged: (v) => setState(() => _tipo = v!),
           ),
           const SizedBox(height: 12),
-          // Selector de ícono
           const Align(
             alignment: Alignment.centerLeft,
             child: Text('Ícono',
@@ -650,13 +669,13 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancelar'),
-        ),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar')),
         FilledButton(
           onPressed: _guardando ? null : _guardar,
           child: _guardando
-              ? const SizedBox(width: 18, height: 18,
+              ? const SizedBox(
+                  width: 18, height: 18,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Text(esEdicion ? 'Guardar' : 'Crear'),

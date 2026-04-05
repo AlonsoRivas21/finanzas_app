@@ -10,6 +10,7 @@ import 'screens/configuracion_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/movimientos_screen.dart';
 import 'screens/gestion_screen.dart';
+import 'screens/presupuestos_screen.dart';
 import 'screens/auth_screen.dart';
 
 const supabaseUrl = 'https://deqkrupzguxsszcrpkcv.supabase.co';
@@ -58,7 +59,7 @@ class FinanzasApp extends StatelessWidget {
   }
 }
 
-// ── Navegación móvil (sin cambios) ────────────────────────────────────────────
+// ── Móvil ─────────────────────────────────────────────────────────────────────
 
 class _MobileHome extends StatefulWidget {
   const _MobileHome();
@@ -69,6 +70,12 @@ class _MobileHome extends StatefulWidget {
 
 class _MobileHomeState extends State<_MobileHome> {
   int _index = 0;
+
+  final _screens = const [
+    DashboardScreen(),
+    MovimientosScreen(),
+    PresupuestosScreen(),
+  ];
 
   Future<void> _abrirConfiguracion() async {
     final huboambios = await Navigator.push<bool>(
@@ -82,17 +89,12 @@ class _MobileHomeState extends State<_MobileHome> {
 
   @override
   Widget build(BuildContext context) {
-    final screens = [
-      const DashboardScreen(),
-      const MovimientosScreen(),
-    ];
-
     return Scaffold(
-      body: screens[_index],
+      body: _screens[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) {
-          if (i == 2) {
+          if (i == 3) {
             _abrirConfiguracion();
           } else {
             setState(() => _index = i);
@@ -110,6 +112,11 @@ class _MobileHomeState extends State<_MobileHome> {
             label: 'Movimientos',
           ),
           NavigationDestination(
+            icon: Icon(Icons.savings_outlined),
+            selectedIcon: Icon(Icons.savings),
+            label: 'Presupuestos',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),
             label: 'Ajustes',
@@ -120,7 +127,7 @@ class _MobileHomeState extends State<_MobileHome> {
   }
 }
 
-// ── Navegación web (rail lateral) ─────────────────────────────────────────────
+// ── Web ───────────────────────────────────────────────────────────────────────
 
 class _WebHome extends StatefulWidget {
   const _WebHome();
@@ -135,6 +142,7 @@ class _WebHomeState extends State<_WebHome> {
   final _screens = const [
     DashboardScreen(),
     MovimientosScreen(),
+    PresupuestosScreen(),
     GestionScreen(),
     ConfiguracionScreen(),
   ];
@@ -143,7 +151,6 @@ class _WebHomeState extends State<_WebHome> {
   Widget build(BuildContext context) {
     final session = Supabase.instance.client.auth.currentSession;
 
-    // Si no hay sesión en web, mostrar login
     if (session == null) {
       return Scaffold(
         body: Center(
@@ -158,7 +165,6 @@ class _WebHomeState extends State<_WebHome> {
     return Scaffold(
       body: Row(
         children: [
-          // Rail de navegación lateral
           NavigationRail(
             selectedIndex: _index,
             onDestinationSelected: (i) => setState(() => _index = i),
@@ -174,6 +180,11 @@ class _WebHomeState extends State<_WebHome> {
                 icon: Icon(Icons.receipt_long_outlined),
                 selectedIcon: Icon(Icons.receipt_long),
                 label: Text('Movimientos'),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.savings_outlined),
+                selectedIcon: Icon(Icons.savings),
+                label: Text('Presupuestos'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.manage_accounts_outlined),
@@ -204,7 +215,6 @@ class _WebHomeState extends State<_WebHome> {
             ),
           ),
           const VerticalDivider(thickness: 1, width: 1),
-          // Contenido principal
           Expanded(child: _screens[_index]),
         ],
       ),

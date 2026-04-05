@@ -5,6 +5,7 @@ import '../models/movimiento.dart';
 import 'database_helper.dart';
 import 'saldos_service.dart';
 import 'saldos_cuentas_service.dart';
+import 'presupuesto_service.dart';
 
 class SupabaseService {
   static final _client = Supabase.instance.client;
@@ -46,31 +47,22 @@ class SupabaseService {
       await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
     }
 
-    // 2. Aplicar eliminaciones pendientes en Supabase
+    // 2. Aplicar eliminaciones de movimientos
     final eliminados = await db.getEliminadosPendientes();
     if (eliminados.isNotEmpty) {
-      // Registrar en tabla movimientos_eliminados de Supabase
-      final rows = eliminados.map((id) => {
-        'usuario_id': usuarioActual!.id,
-        'movimiento_id': id,
-        'eliminado_at': DateTime.now().toIso8601String(),
-      }).toList();
-      await _client.from('movimientos_eliminados')
-          .upsert(rows, onConflict: 'usuario_id,movimiento_id');
-
-      // Borrar de movimientos en Supabase
       for (final id in eliminados) {
         await _client.from('movimientos').delete().eq('id', id);
       }
-
-      // Limpiar lista local de eliminados
       await db.limpiarEliminados();
     }
 
-    // 3. Subir saldos iniciales
+    // 3. Subir presupuestos pendientes
+    await PresupuestoService.subirPresupuestos();
+
+    // 4. Subir saldos iniciales
     await SaldosService.subirSaldos();
 
-    // 4. Recalcular saldos_cuentas en Supabase con historial completo
+    // 5. Recalcular saldos_cuentas
     await SaldosCuentasService.recalcularDesdeHistorial();
 
     return pendientes.length;
@@ -107,7 +99,10 @@ class SupabaseService {
       await db.insertMovimientos(movimientos);
     }
 
-    // 2. Bajar saldos iniciales
+    // 2. Bajar presupuestos
+    await PresupuestoService.bajarPresupuestos();
+
+    // 3. Bajar saldos iniciales
     await SaldosService.bajarSaldos();
 
     return movimientos.length;
@@ -117,15 +112,16 @@ class SupabaseService {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
     final db = DatabaseHelper();
-    final pendientes = await db.getNoSincronizados();
-    final eliminados = await db.getEliminadosPendientes();
+    final pendientes  = await db.getNoSincronizados();
+    final eliminados  = await db.getEliminadosPendientes();
+    final presupPend  = await PresupuestoService.getNoSincronizados();
+    final presupElim  = await PresupuestoService.getEliminadosPendientes();
 
-    if (pendientes.isNotEmpty || eliminados.isNotEmpty) {
-      // Hay cambios locales — subir
+    if (pendientes.isNotEmpty || eliminados.isNotEmpty ||
+        presupPend.isNotEmpty || presupElim.isNotEmpty) {
       final cantidad = await subir();
       return (accion: 'subida', cantidad: cantidad);
     } else {
-      // Sin cambios locales — bajar respaldo
       final cantidad = await bajar();
       return (accion: 'bajada', cantidad: cantidad);
     }
