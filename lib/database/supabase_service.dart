@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
 import 'database_helper.dart';
 import 'saldos_service.dart';
-import 'saldos_cuentas_service.dart';
 import 'presupuesto_service.dart';
 
 class SupabaseService {
@@ -26,20 +25,18 @@ class SupabaseService {
     await _client.auth.signOut();
   }
 
-  // ── Sincronización ────────────────────────────────────────────────────────
+  // ── Subida: local → Supabase ──────────────────────────────────────────────
 
   static Future<int> subir() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
-
     final db = DatabaseHelper();
 
-    // 1. Subir movimientos pendientes
+    // 1. Movimientos nuevos/editados
     final pendientes = await db.getNoSincronizados();
     if (pendientes.isNotEmpty) {
-      final userId = usuarioActual!.id;
       final datos = pendientes.map((m) {
         final map = m.toMap();
-        map['usuario_id'] = userId;
+        map['usuario_id'] = usuarioActual!.id;
         map.remove('sincronizado');
         return map;
       }).toList();
@@ -47,7 +44,7 @@ class SupabaseService {
       await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
     }
 
-    // 2. Aplicar eliminaciones de movimientos
+    // 2. Movimientos eliminados
     final eliminados = await db.getEliminadosPendientes();
     if (eliminados.isNotEmpty) {
       for (final id in eliminados) {
@@ -56,24 +53,22 @@ class SupabaseService {
       await db.limpiarEliminados();
     }
 
-    // 3. Subir presupuestos pendientes
+    // 3. Presupuestos
     await PresupuestoService.subirPresupuestos();
 
-    // 4. Subir saldos iniciales
+    // 4. Saldos iniciales
     await SaldosService.subirSaldos();
-
-    // 5. Recalcular saldos_cuentas
-    await SaldosCuentasService.recalcularDesdeHistorial();
 
     return pendientes.length;
   }
 
+  // ── Bajada: Supabase → local ──────────────────────────────────────────────
+
   static Future<int> bajar() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
-
     final db = DatabaseHelper();
 
-    // 1. Bajar movimientos
+    // 1. Movimientos
     final response = await _client
         .from('movimientos')
         .select()
@@ -95,30 +90,29 @@ class SupabaseService {
     })).toList();
 
     await db.clearAll();
-    if (movimientos.isNotEmpty) {
-      await db.insertMovimientos(movimientos);
-    }
+    if (movimientos.isNotEmpty) await db.insertMovimientos(movimientos);
 
-    // 2. Bajar presupuestos
+    // 2. Presupuestos
     await PresupuestoService.bajarPresupuestos();
 
-    // 3. Bajar saldos iniciales
+    // 3. Saldos iniciales
     await SaldosService.bajarSaldos();
 
     return movimientos.length;
   }
 
+  // ── Sincronización inteligente ────────────────────────────────────────────
+
   static Future<({String accion, int cantidad})> sincronizar() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
     final db = DatabaseHelper();
-    final pendientes  = await db.getNoSincronizados();
-    final eliminados  = await db.getEliminadosPendientes();
-    final presupPend  = await PresupuestoService.getNoSincronizados();
-    final presupElim  = await PresupuestoService.getEliminadosPendientes();
+    final hayPendientes = (await db.getNoSincronizados()).isNotEmpty;
+    final hayEliminados = (await db.getEliminadosPendientes()).isNotEmpty;
+    final hayPresupPend = (await PresupuestoService.getNoSincronizados()).isNotEmpty;
+    final hayPresupElim = (await PresupuestoService.getEliminadosPendientes()).isNotEmpty;
 
-    if (pendientes.isNotEmpty || eliminados.isNotEmpty ||
-        presupPend.isNotEmpty || presupElim.isNotEmpty) {
+    if (hayPendientes || hayEliminados || hayPresupPend || hayPresupElim) {
       final cantidad = await subir();
       return (accion: 'subida', cantidad: cantidad);
     } else {
