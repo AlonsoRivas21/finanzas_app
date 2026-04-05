@@ -1,14 +1,14 @@
 // lib/models/movimientos_provider.dart
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'movimiento.dart';
-import '../database/database_helper.dart';
 import '../database/data_repository.dart';
+import '../database/database_helper.dart';
 
 class MovimientosProvider extends ChangeNotifier {
   final _repo = DataRepository();
-  final _db   = DatabaseHelper();
   final _uuid = const Uuid();
 
   List<Movimiento> _movimientos = [];
@@ -114,21 +114,24 @@ class MovimientosProvider extends ChangeNotifier {
     await cargar();
   }
 
+  /// Resumen del mes — SQLite en móvil, Supabase en web
   Future<Map<String, double>> getResumenMes() async =>
-      _db.getResumenMes(_mesActual, _anioActual);
+      _repo.getResumenMes(_mesActual, _anioActual);
 
-  /// Saldos calculados 100% desde SQLite local
-  /// saldo_actual = saldo_inicial (shared_prefs) + suma de movimientos locales
+  /// Saldos actuales — SQLite en móvil, Supabase en web
   Future<Map<String, double>> getSaldosPorCuenta() async =>
-      _db.getSaldosPorCuentaLocal();
+      _repo.getSaldosPorCuenta();
 
   Future<List<Map<String, dynamic>>> getGastosPorCategoria() async =>
-      _db.getGastosPorCategoria(_mesActual, _anioActual);
+      _repo.getGastosPorCategoria(_mesActual, _anioActual);
 
   Future<List<Map<String, dynamic>>> getResumenPorSemana() async =>
-      _db.getResumenPorSemana(_mesActual, _anioActual);
+      _repo.getResumenPorSemana(_mesActual, _anioActual);
 
-  Future<int> getTotalRegistros() async => _db.countMovimientos();
+  Future<int> getTotalRegistros() async {
+    if (kIsWeb) return 0;
+    return DatabaseHelper().countMovimientos();
+  }
 
   Future<int> importarLista(List<Movimiento> lista) async {
     await _repo.insertMovimientos(lista);

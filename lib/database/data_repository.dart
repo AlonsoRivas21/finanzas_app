@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
 import 'database_helper.dart';
-import 'saldos_cuentas_service.dart';
+import 'saldos_service.dart';
 
 class DataRepository {
   static final DataRepository _instance = DataRepository._internal();
@@ -12,16 +12,16 @@ class DataRepository {
   DataRepository._internal();
 
   static final _client = Supabase.instance.client;
-
-  bool get esWeb => kIsWeb;
   String get _uid => _client.auth.currentUser?.id ?? '';
+
+  // ── Movimientos ───────────────────────────────────────────────────────────
 
   Future<List<Movimiento>> getMovimientos({
     int? mes, int? anio, String? cuenta,
     String? tipo, String? busqueda,
     int limit = 300, int offset = 0,
   }) async {
-    if (!esWeb) {
+    if (!kIsWeb) {
       return DatabaseHelper().getMovimientos(
         mes: mes, anio: anio, cuenta: cuenta,
         tipo: tipo, busqueda: busqueda,
@@ -29,20 +29,13 @@ class DataRepository {
       );
     }
 
-    var query = _client
-        .from('movimientos')
-        .select()
-        .eq('usuario_id', _uid);
-
+    var query = _client.from('movimientos').select().eq('usuario_id', _uid);
     if (mes != null)    query = query.eq('mes', mes);
     if (anio != null)   query = query.eq('anio', anio);
     if (cuenta != null) query = query.eq('cuenta', cuenta);
     if (tipo != null)   query = query.eq('tipo', tipo);
 
-    final response = await query
-        .order('fecha', ascending: false)
-        .limit(limit);
-
+    final response = await query.order('fecha', ascending: false).limit(limit);
     var lista = (response as List).map(_fromRow).toList();
 
     if (busqueda != null && busqueda.isNotEmpty) {
@@ -53,27 +46,26 @@ class DataRepository {
         (m.comentario?.toLowerCase().contains(q) ?? false)
       ).toList();
     }
-
     return lista;
   }
 
   Future<void> insertMovimiento(Movimiento m) async {
-    if (!esWeb) { await DatabaseHelper().insertMovimiento(m); return; }
+    if (!kIsWeb) { await DatabaseHelper().insertMovimiento(m); return; }
     await _client.from('movimientos').upsert(_toRow(m));
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
-    if (!esWeb) { await DatabaseHelper().insertMovimientos(lista); return; }
+    if (!kIsWeb) { await DatabaseHelper().insertMovimientos(lista); return; }
     await _client.from('movimientos').upsert(lista.map(_toRow).toList());
   }
 
   Future<void> updateMovimiento(Movimiento m) async {
-    if (!esWeb) { await DatabaseHelper().updateMovimiento(m); return; }
+    if (!kIsWeb) { await DatabaseHelper().updateMovimiento(m); return; }
     await _client.from('movimientos').update(_toRow(m)).eq('id', m.id);
   }
 
   Future<void> deleteMovimiento(String id) async {
-    if (!esWeb) { await DatabaseHelper().deleteMovimiento(id); return; }
+    if (!kIsWeb) { await DatabaseHelper().deleteMovimiento(id); return; }
     if (id.endsWith('_out') || id.endsWith('_in')) {
       final base = id.replaceAll('_out', '').replaceAll('_in', '');
       await _client.from('movimientos').delete().eq('id', '${base}_out');
@@ -84,14 +76,25 @@ class DataRepository {
   }
 
   Future<int> countMovimientos() async {
-    if (!esWeb) return DatabaseHelper().countMovimientos();
+    if (!kIsWeb) return DatabaseHelper().countMovimientos();
     final res = await _client.from('movimientos')
         .select('id').eq('usuario_id', _uid);
     return (res as List).length;
   }
 
+  Future<List<Movimiento>> getNoSincronizados() async {
+    if (!kIsWeb) return DatabaseHelper().getNoSincronizados();
+    return [];
+  }
+
+  Future<void> marcarSincronizados(List<String> ids) async {
+    if (!kIsWeb) await DatabaseHelper().marcarSincronizados(ids);
+  }
+
+  // ── Resúmenes ─────────────────────────────────────────────────────────────
+
   Future<Map<String, double>> getResumenMes(int mes, int anio) async {
-    if (!esWeb) return DatabaseHelper().getResumenMes(mes, anio);
+    if (!kIsWeb) return DatabaseHelper().getResumenMes(mes, anio);
 
     final res = await _client.from('movimientos')
         .select('tipo, monto')
@@ -108,13 +111,31 @@ class DataRepository {
     return {'ingresos': ingresos, 'egresos': egresos};
   }
 
-  /// Usa saldos_cuentas — correcto sin importar cuántos movimientos haya
-  Future<Map<String, double>> getSaldosPorCuenta() async =>
-      SaldosCuentasService.getSaldosActuales();
+  /// Saldos actuales:
+  /// - Móvil: saldo_inicial (shared_prefs) + movimientos SQLite
+  /// - Web:   saldo_inicial (Supabase) + movimientos Supabase
+  Future<Map<String, double>> getSaldosPorCuenta() async {
+    if (!kIsWeb) return DatabaseHelper().getSaldosPorCuentaLocal();
+
+    // Web: saldos iniciales desde Supabase
+    final saldos = await SaldosService.getSaldosIniciales();
+
+    final res = await _client.from('movimientos')
+        .select('cuenta, tipo, monto')
+        .eq('usuario_id', _uid);
+
+    for (final row in res as List) {
+      final cuenta = row['cuenta'] as String;
+      final monto  = (row['monto'] as num).toDouble();
+      final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
+      saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+    }
+    return saldos;
+  }
 
   Future<List<Map<String, dynamic>>> getGastosPorCategoria(
       int mes, int anio) async {
-    if (!esWeb) return DatabaseHelper().getGastosPorCategoria(mes, anio);
+    if (!kIsWeb) return DatabaseHelper().getGastosPorCategoria(mes, anio);
 
     final res = await _client.from('movimientos')
         .select('categoria, monto')
@@ -128,7 +149,6 @@ class DataRepository {
       final cat = row['categoria'] as String;
       mapa[cat] = (mapa[cat] ?? 0) + (row['monto'] as num).toDouble();
     }
-
     return mapa.entries
         .map((e) => {'categoria': e.key, 'total': e.value})
         .toList()
@@ -138,7 +158,7 @@ class DataRepository {
 
   Future<List<Map<String, dynamic>>> getResumenPorSemana(
       int mes, int anio) async {
-    if (!esWeb) return DatabaseHelper().getResumenPorSemana(mes, anio);
+    if (!kIsWeb) return DatabaseHelper().getResumenPorSemana(mes, anio);
 
     final res = await _client.from('movimientos')
         .select('fecha, tipo, monto, categoria')
@@ -153,7 +173,7 @@ class DataRepository {
       final cat = row['categoria'] as String;
       if (cat == 'TRANSFERENCIA' || cat == 'SALDO') continue;
       final dia = int.parse((row['fecha'] as String).substring(8, 10));
-      final s = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
+      final s   = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
       final monto = (row['monto'] as num).toDouble();
       if (row['tipo'] == 'ingreso') {
         semanas[s]['ingresos'] = (semanas[s]['ingresos'] as double) + monto;
@@ -161,7 +181,6 @@ class DataRepository {
         semanas[s]['egresos'] = (semanas[s]['egresos'] as double) + monto;
       }
     }
-
     return semanas.where((s) =>
         (s['ingresos'] as double) > 0 ||
         (s['egresos'] as double) > 0).toList();
@@ -169,7 +188,7 @@ class DataRepository {
 
   Future<Map<String, Map<String, double>>> getResumenPorCuenta(
       int anio) async {
-    if (!esWeb) return DatabaseHelper().getResumenPorCuenta(anio);
+    if (!kIsWeb) return DatabaseHelper().getResumenPorCuenta(anio);
 
     final res = await _client.from('movimientos')
         .select('cuenta, tipo, monto')
@@ -192,11 +211,10 @@ class DataRepository {
   }
 
   Future<List<int>> getAniosDisponibles() async {
-    if (!esWeb) return DatabaseHelper().getAniosDisponibles();
+    if (!kIsWeb) return DatabaseHelper().getAniosDisponibles();
 
     final res = await _client.from('movimientos')
         .select('anio').eq('usuario_id', _uid);
-
     return (res as List)
         .map((r) => r['anio'] as int)
         .toSet()
@@ -204,19 +222,10 @@ class DataRepository {
       ..sort((a, b) => b.compareTo(a));
   }
 
-  Future<List<Movimiento>> getNoSincronizados() async {
-    if (!esWeb) return DatabaseHelper().getNoSincronizados();
-    return [];
-  }
-
-  Future<void> marcarSincronizados(List<String> ids) async {
-    if (!esWeb) await DatabaseHelper().marcarSincronizados(ids);
-  }
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   Map<String, dynamic> _toRow(Movimiento m) => {
-    ...m.toMap(),
-    'usuario_id': _uid,
-    'sincronizado': 1,
+    ...m.toMap(), 'usuario_id': _uid, 'sincronizado': 1,
   };
 
   Movimiento _fromRow(dynamic row) => Movimiento.fromMap({
