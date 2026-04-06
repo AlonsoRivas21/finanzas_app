@@ -59,6 +59,9 @@ class SupabaseService {
     // 4. Saldos iniciales
     await SaldosService.subirSaldos();
 
+    // 5. Recalcular saldos actuales en Supabase desde historial completo
+    await _recalcularSaldosEnSupabase();
+
     return pendientes.length;
   }
 
@@ -95,10 +98,57 @@ class SupabaseService {
     // 2. Presupuestos
     await PresupuestoService.bajarPresupuestos();
 
-    // 3. Saldos iniciales
+    // 3. Saldos iniciales → se guardan en shared_prefs
     await SaldosService.bajarSaldos();
 
     return movimientos.length;
+  }
+
+  // ── Recalcular saldos en Supabase ─────────────────────────────────────────
+  // Suma saldo_inicial + todos los movimientos en Supabase
+  // Así saldos_cuentas siempre refleja el estado real del historial completo
+
+  static Future<void> _recalcularSaldosEnSupabase() async {
+    try {
+      // Leer saldos iniciales desde Supabase
+      final initRes = await _client
+          .from('saldos_iniciales')
+          .select()
+          .eq('usuario_id', usuarioActual!.id);
+
+      final saldos = <String, double>{};
+      for (final row in initRes as List) {
+        saldos[row['cuenta'] as String] = (row['saldo'] as num).toDouble();
+      }
+
+      // Sumar todos los movimientos del historial completo en Supabase
+      final movRes = await _client
+          .from('movimientos')
+          .select('cuenta, tipo, monto')
+          .eq('usuario_id', usuarioActual!.id);
+
+      for (final row in movRes as List) {
+        final cuenta = row['cuenta'] as String;
+        final monto  = (row['monto'] as num).toDouble();
+        final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
+        saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+      }
+
+      // Guardar en saldos_cuentas
+      if (saldos.isNotEmpty) {
+        final rows = saldos.entries.map((e) => {
+          'usuario_id':   usuarioActual!.id,
+          'cuenta':       e.key,
+          'saldo_actual': e.value,
+          'updated_at':   DateTime.now().toIso8601String(),
+        }).toList();
+
+        await _client.from('saldos_cuentas')
+            .upsert(rows, onConflict: 'usuario_id,cuenta');
+      }
+    } catch (_) {
+      // Si falla no detiene la sincronización
+    }
   }
 
   // ── Sincronización inteligente ────────────────────────────────────────────

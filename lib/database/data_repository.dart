@@ -112,19 +112,39 @@ class DataRepository {
   }
 
   /// Saldos actuales:
-  /// - Móvil: saldo_inicial (shared_prefs) + movimientos SQLite
-  /// - Web:   saldo_inicial (Supabase) + movimientos Supabase
+  /// - Móvil: saldo_inicial (shared_prefs) + movimientos SQLite → 100% offline
+  /// - Web:   lee saldos_cuentas en Supabase (calculados al sincronizar)
   Future<Map<String, double>> getSaldosPorCuenta() async {
-    if (!kIsWeb) return DatabaseHelper().getSaldosPorCuentaLocal();
+    if (!kIsWeb) {
+      // Móvil: calcular local siempre
+      return DatabaseHelper().getSaldosPorCuentaLocal();
+    }
 
-    // Web: saldos iniciales desde Supabase
+    // Web: leer de saldos_cuentas (precalculados al sincronizar desde app)
     final saldos = await SaldosService.getSaldosIniciales();
+    try {
+      final res = await _client
+          .from('saldos_cuentas')
+          .select('cuenta, saldo_actual')
+          .eq('usuario_id', _uid);
 
-    final res = await _client.from('movimientos')
+      if ((res as List).isNotEmpty) {
+        // Usar saldos precalculados
+        for (final row in res) {
+          saldos[row['cuenta'] as String] =
+              (row['saldo_actual'] as num).toDouble();
+        }
+        return saldos;
+      }
+    } catch (_) {}
+
+    // Fallback web: calcular sumando movimientos si no hay saldos_cuentas
+    final movRes = await _client
+        .from('movimientos')
         .select('cuenta, tipo, monto')
         .eq('usuario_id', _uid);
 
-    for (final row in res as List) {
+    for (final row in movRes as List) {
       final cuenta = row['cuenta'] as String;
       final monto  = (row['monto'] as num).toDouble();
       final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
@@ -212,7 +232,6 @@ class DataRepository {
 
   Future<List<int>> getAniosDisponibles() async {
     if (!kIsWeb) return DatabaseHelper().getAniosDisponibles();
-
     final res = await _client.from('movimientos')
         .select('anio').eq('usuario_id', _uid);
     return (res as List)
