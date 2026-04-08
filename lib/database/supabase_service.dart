@@ -79,7 +79,7 @@ class SupabaseService {
         .select()
         .eq('usuario_id', usuarioActual!.id)
         .order('fecha', ascending: false)
-        .limit(50); // <-- Cambiar despues
+        .limit(5000); // <-- Cambiar despues
 
     final movimientos = (response as List).map((row) => Movimiento.fromMap({
       'id':          row['id'],
