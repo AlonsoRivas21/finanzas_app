@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'finanzas.db');
-    return openDatabase(path, version: 3,
+    return openDatabase(path, version: 4,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -45,6 +45,13 @@ class DatabaseHelper {
         eliminado_at TEXT NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE saldos_cuentas (
+        cuenta TEXT PRIMARY KEY,
+        saldo_actual REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      )
+    ''');
     await db.execute('CREATE INDEX idx_fecha ON movimientos(fecha DESC)');
     await db.execute('CREATE INDEX idx_mes_anio ON movimientos(mes, anio)');
     await db.execute('CREATE INDEX idx_cuenta ON movimientos(cuenta)');
@@ -65,6 +72,107 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 4) {
+      // Agregar tabla saldos_cuentas local
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS saldos_cuentas (
+          cuenta TEXT PRIMARY KEY,
+          saldo_actual REAL NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      // Calcular saldos iniciales desde el historial existente
+      await _inicializarSaldosDesdeHistorial(db);
+    }
+  }
+
+  /// Al migrar, calcula saldos desde saldos_iniciales + movimientos existentes
+  Future<void> _inicializarSaldosDesdeHistorial(Database db) async {
+    try {
+      // Leer saldos iniciales desde shared_prefs
+      final saldosIniciales = await SaldosService.getSaldosIniciales();
+
+      // Sumar movimientos existentes
+      final rows = await db.rawQuery('''
+        SELECT cuenta,
+          SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE -monto END) as delta
+        FROM movimientos GROUP BY cuenta
+      ''');
+
+      final saldos = Map<String, double>.from(saldosIniciales);
+      for (final row in rows) {
+        final cuenta = row['cuenta'] as String;
+        final delta  = (row['delta'] as num).toDouble();
+        saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+      }
+
+      // Guardar en saldos_cuentas
+      final batch = db.batch();
+      for (final entry in saldos.entries) {
+        batch.insert('saldos_cuentas', {
+          'cuenta':       entry.key,
+          'saldo_actual': entry.value,
+          'updated_at':   DateTime.now().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await batch.commit(noResult: true);
+    } catch (_) {}
+  }
+
+  // ── Saldos con delta ──────────────────────────────────────────────────────
+
+  /// Aplica delta al saldo local de una cuenta
+  Future<void> aplicarDeltaSaldo(String cuenta, double delta) async {
+    final database = await db;
+
+    // Leer saldo actual
+    final rows = await database.query('saldos_cuentas',
+        where: 'cuenta = ?', whereArgs: [cuenta]);
+
+    double saldoActual;
+    if (rows.isEmpty) {
+      // No existe — partir del saldo inicial
+      final iniciales = await SaldosService.getSaldosIniciales();
+      saldoActual = iniciales[cuenta] ?? 0;
+    } else {
+      saldoActual = (rows.first['saldo_actual'] as num).toDouble();
+    }
+
+    await database.insert('saldos_cuentas', {
+      'cuenta':       cuenta,
+      'saldo_actual': saldoActual + delta,
+      'updated_at':   DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Lee saldos actuales desde la tabla local
+  Future<Map<String, double>> getSaldosActualesLocal() async {
+    final database = await db;
+
+    // Partir de saldos iniciales
+    final saldos = await SaldosService.getSaldosIniciales();
+
+    // Sobreescribir con los saldos calculados si existen
+    final rows = await database.query('saldos_cuentas');
+    for (final row in rows) {
+      saldos[row['cuenta'] as String] =
+          (row['saldo_actual'] as num).toDouble();
+    }
+    return saldos;
+  }
+
+  /// Guarda saldos bajados de Supabase en la tabla local
+  Future<void> guardarSaldosDesdeNube(Map<String, double> saldos) async {
+    final database = await db;
+    final batch = database.batch();
+    for (final entry in saldos.entries) {
+      batch.insert('saldos_cuentas', {
+        'cuenta':       entry.key,
+        'saldo_actual': entry.value,
+        'updated_at':   DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
   }
 
   // ── CRUD movimientos ──────────────────────────────────────────────────────
@@ -73,6 +181,9 @@ class DatabaseHelper {
     final database = await db;
     await database.insert('movimientos', m.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace);
+    // Aplicar delta al saldo local
+    final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
+    await aplicarDeltaSaldo(m.cuenta.nombre, delta);
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
@@ -83,18 +194,54 @@ class DatabaseHelper {
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
+    // Aplicar delta por cada movimiento
+    for (final m in lista) {
+      final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
+      await aplicarDeltaSaldo(m.cuenta.nombre, delta);
+    }
   }
 
-  Future<void> updateMovimiento(Movimiento m) async {
+  Future<void> updateMovimiento(Movimiento nuevo) async {
     final database = await db;
-    await database.update('movimientos', m.toMap(),
-        where: 'id = ?', whereArgs: [m.id]);
+
+    // Leer movimiento anterior para revertir su efecto
+    final rows = await database.query('movimientos',
+        where: 'id = ?', whereArgs: [nuevo.id]);
+
+    if (rows.isNotEmpty) {
+      final anterior = Movimiento.fromMap(rows.first);
+      // Revertir delta anterior
+      final deltaAnterior =
+          anterior.tipo == TipoMovimiento.ingreso
+              ? -anterior.monto
+              : anterior.monto;
+      await aplicarDeltaSaldo(anterior.cuenta.nombre, deltaAnterior);
+    }
+
+    await database.update('movimientos', nuevo.toMap(),
+        where: 'id = ?', whereArgs: [nuevo.id]);
+
+    // Aplicar nuevo delta
+    final deltaNuevo =
+        nuevo.tipo == TipoMovimiento.ingreso ? nuevo.monto : -nuevo.monto;
+    await aplicarDeltaSaldo(nuevo.cuenta.nombre, deltaNuevo);
   }
 
   Future<void> deleteMovimiento(String id) async {
     final database = await db;
+
+    // Leer movimiento antes de borrarlo para revertir delta
+    final rows = await database.query('movimientos',
+        where: 'id = ?', whereArgs: [id]);
+
+    if (rows.isNotEmpty) {
+      final m = Movimiento.fromMap(rows.first);
+      final delta =
+          m.tipo == TipoMovimiento.ingreso ? -m.monto : m.monto;
+      await aplicarDeltaSaldo(m.cuenta.nombre, delta);
+    }
+
     await database.delete('movimientos', where: 'id = ?', whereArgs: [id]);
-    // Registrar en eliminados para sincronizar después
     await database.insert(
       'movimientos_eliminados',
       {'id': id, 'eliminado_at': DateTime.now().toIso8601String()},
@@ -173,22 +320,9 @@ class DatabaseHelper {
     return {'ingresos': ingresos, 'egresos': egresos};
   }
 
-  Future<Map<String, double>> getSaldosPorCuentaLocal() async {
-    final database = await db;
-    final saldos = await SaldosService.getSaldosIniciales();
-    final result = await database.rawQuery('''
-      SELECT cuenta,
-        SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE -monto END) as movimientos
-      FROM movimientos
-      GROUP BY cuenta
-    ''');
-    for (final row in result) {
-      final cuenta = row['cuenta'] as String;
-      final movs = (row['movimientos'] as num).toDouble();
-      saldos[cuenta] = (saldos[cuenta] ?? 0) + movs;
-    }
-    return saldos;
-  }
+  /// Saldos desde tabla local — correctos aunque falte historial
+  Future<Map<String, double>> getSaldosPorCuentaLocal() async =>
+      getSaldosActualesLocal();
 
   Future<Map<String, Map<String, double>>> getResumenPorCuenta(int anio) async {
     final database = await db;
@@ -248,7 +382,7 @@ class DatabaseHelper {
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
 
     for (final row in result) {
-      final s = row['semana'] as int;
+      final s    = row['semana'] as int;
       final tipo = row['tipo'] as String;
       final total = (row['total'] as num).toDouble();
       if (tipo == 'ingreso') {
@@ -257,7 +391,6 @@ class DatabaseHelper {
         semanas[s]['egresos'] = total;
       }
     }
-
     return semanas.where((s) =>
         (s['ingresos'] as double) > 0 ||
         (s['egresos'] as double) > 0).toList();
@@ -297,5 +430,6 @@ class DatabaseHelper {
     final database = await db;
     await database.delete('movimientos');
     await database.delete('movimientos_eliminados');
+    // NO limpiar saldos_cuentas — se bajan de Supabase al sincronizar
   }
 }

@@ -9,6 +9,7 @@ import '../database/database_helper.dart';
 
 class MovimientosProvider extends ChangeNotifier {
   final _repo = DataRepository();
+  final _db   = DatabaseHelper();
   final _uuid = const Uuid();
 
   List<Movimiento> _movimientos = [];
@@ -74,6 +75,8 @@ class MovimientosProvider extends ChangeNotifier {
       categoria: categoria, cuenta: cuenta, comentario: comentario,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
+    // insertMovimiento ya aplica el delta en móvil
+    // en web DataRepository aplica delta en Supabase
     await _repo.insertMovimiento(m);
     await cargar();
   }
@@ -88,37 +91,55 @@ class MovimientosProvider extends ChangeNotifier {
     final idBase = _uuid.v4();
     final nota = comentario ??
         'Transferencia ${cuentaOrigen.nombre} → ${cuentaDestino.nombre}';
+
+    // EGRESO en cuenta origen
     final egreso = Movimiento(
-      id: '${idBase}_out', fecha: fecha, tipo: TipoMovimiento.egreso,
-      monto: monto, categoria: Categoria.transferencia,
+      id: '${idBase}_out', fecha: fecha,
+      tipo: TipoMovimiento.egreso,   // ← resta en origen
+      monto: monto,
+      categoria: Categoria.transferencia,
       cuenta: cuentaOrigen, comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
+
+    // INGRESO en cuenta destino
     final ingreso = Movimiento(
-      id: '${idBase}_in', fecha: fecha, tipo: TipoMovimiento.ingreso,
-      monto: monto, categoria: Categoria.transferencia,
+      id: '${idBase}_in', fecha: fecha,
+      tipo: TipoMovimiento.ingreso,  // ← suma en destino
+      monto: monto,
+      categoria: Categoria.transferencia,
       cuenta: cuentaDestino, comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
+
+    // insertMovimientos aplica delta individualmente a cada uno
     await _repo.insertMovimientos([egreso, ingreso]);
     await cargar();
   }
 
   Future<void> editar(Movimiento nuevo) async {
+    // updateMovimiento revierte el delta anterior y aplica el nuevo
     await _repo.updateMovimiento(nuevo.copyWith(sincronizado: false));
     await cargar();
   }
 
   Future<void> eliminar(String id) async {
+    // deleteMovimiento lee el movimiento antes de borrarlo y revierte delta
     await _repo.deleteMovimiento(id);
+
+    // Si es transferencia, eliminar también el par
+    if (id.endsWith('_out') || id.endsWith('_in')) {
+      final base = id.replaceAll('_out', '').replaceAll('_in', '');
+      final parId = id.endsWith('_out') ? '${base}_in' : '${base}_out';
+      await _repo.deleteMovimiento(parId);
+    }
     await cargar();
   }
 
-  /// Resumen del mes — SQLite en móvil, Supabase en web
   Future<Map<String, double>> getResumenMes() async =>
       _repo.getResumenMes(_mesActual, _anioActual);
 
-  /// Saldos actuales — SQLite en móvil, Supabase en web
+  /// Saldos desde tabla local (móvil) o Supabase (web)
   Future<Map<String, double>> getSaldosPorCuenta() async =>
       _repo.getSaldosPorCuenta();
 
@@ -130,7 +151,7 @@ class MovimientosProvider extends ChangeNotifier {
 
   Future<int> getTotalRegistros() async {
     if (kIsWeb) return 0;
-    return DatabaseHelper().countMovimientos();
+    return _db.countMovimientos();
   }
 
   Future<int> importarLista(List<Movimiento> lista) async {

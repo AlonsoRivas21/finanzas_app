@@ -29,14 +29,15 @@ class SupabaseService {
 
   static Future<int> subir() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
-    final db = DatabaseHelper();
+    final db  = DatabaseHelper();
+    final uid = usuarioActual!.id;
 
     // 1. Movimientos nuevos/editados
     final pendientes = await db.getNoSincronizados();
     if (pendientes.isNotEmpty) {
       final datos = pendientes.map((m) {
         final map = m.toMap();
-        map['usuario_id'] = usuarioActual!.id;
+        map['usuario_id'] = uid;
         map.remove('sincronizado');
         return map;
       }).toList();
@@ -44,7 +45,7 @@ class SupabaseService {
       await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
     }
 
-    // 2. Movimientos eliminados
+    // 2. Eliminaciones pendientes
     final eliminados = await db.getEliminadosPendientes();
     if (eliminados.isNotEmpty) {
       for (final id in eliminados) {
@@ -59,8 +60,9 @@ class SupabaseService {
     // 4. Saldos iniciales
     await SaldosService.subirSaldos();
 
-    // 5. Recalcular saldos actuales en Supabase desde historial completo
-    await _recalcularSaldosEnSupabase();
+    // 5. Recalcular saldos_cuentas en Supabase desde historial completo
+    // Esto garantiza consistencia después de subir movimientos offline
+    await _recalcularSaldosEnSupabase(uid);
 
     return pendientes.length;
   }
@@ -77,7 +79,7 @@ class SupabaseService {
         .select()
         .eq('usuario_id', usuarioActual!.id)
         .order('fecha', ascending: false)
-        .limit(5000);
+        .limit(50); // <-- Cambiar despues
 
     final movimientos = (response as List).map((row) => Movimiento.fromMap({
       'id':          row['id'],
@@ -98,34 +100,52 @@ class SupabaseService {
     // 2. Presupuestos
     await PresupuestoService.bajarPresupuestos();
 
-    // 3. Saldos iniciales → se guardan en shared_prefs
+    // 3. Saldos iniciales
     await SaldosService.bajarSaldos();
+
+    // 4. Bajar saldos_cuentas de Supabase al local
+    // Así el cel tiene saldos correctos sin recalcular desde historial
+    await _bajarSaldosAlLocal();
 
     return movimientos.length;
   }
 
-  // ── Recalcular saldos en Supabase ─────────────────────────────────────────
-  // Suma saldo_inicial + todos los movimientos en Supabase
-  // Así saldos_cuentas siempre refleja el estado real del historial completo
-
-  static Future<void> _recalcularSaldosEnSupabase() async {
+  /// Baja saldos_cuentas de Supabase y los guarda en SQLite local
+  static Future<void> _bajarSaldosAlLocal() async {
     try {
-      // Leer saldos iniciales desde Supabase
+      final res = await _client
+          .from('saldos_cuentas')
+          .select('cuenta, saldo_actual')
+          .eq('usuario_id', usuarioActual!.id);
+
+      if ((res as List).isNotEmpty) {
+        final saldos = <String, double>{};
+        for (final row in res) {
+          saldos[row['cuenta'] as String] =
+              (row['saldo_actual'] as num).toDouble();
+        }
+        await DatabaseHelper().guardarSaldosDesdeNube(saldos);
+      }
+    } catch (_) {}
+  }
+
+  /// Recalcula saldos_cuentas en Supabase sumando historial completo
+  static Future<void> _recalcularSaldosEnSupabase(String uid) async {
+    try {
       final initRes = await _client
           .from('saldos_iniciales')
           .select()
-          .eq('usuario_id', usuarioActual!.id);
+          .eq('usuario_id', uid);
 
       final saldos = <String, double>{};
       for (final row in initRes as List) {
         saldos[row['cuenta'] as String] = (row['saldo'] as num).toDouble();
       }
 
-      // Sumar todos los movimientos del historial completo en Supabase
       final movRes = await _client
           .from('movimientos')
           .select('cuenta, tipo, monto')
-          .eq('usuario_id', usuarioActual!.id);
+          .eq('usuario_id', uid);
 
       for (final row in movRes as List) {
         final cuenta = row['cuenta'] as String;
@@ -134,21 +154,18 @@ class SupabaseService {
         saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
       }
 
-      // Guardar en saldos_cuentas
-      if (saldos.isNotEmpty) {
-        final rows = saldos.entries.map((e) => {
-          'usuario_id':   usuarioActual!.id,
-          'cuenta':       e.key,
-          'saldo_actual': e.value,
-          'updated_at':   DateTime.now().toIso8601String(),
-        }).toList();
+      if (saldos.isEmpty) return;
 
-        await _client.from('saldos_cuentas')
-            .upsert(rows, onConflict: 'usuario_id,cuenta');
-      }
-    } catch (_) {
-      // Si falla no detiene la sincronización
-    }
+      final rows = saldos.entries.map((e) => {
+        'usuario_id':   uid,
+        'cuenta':       e.key,
+        'saldo_actual': e.value,
+        'updated_at':   DateTime.now().toIso8601String(),
+      }).toList();
+
+      await _client.from('saldos_cuentas')
+          .upsert(rows, onConflict: 'usuario_id,cuenta');
+    } catch (_) {}
   }
 
   // ── Sincronización inteligente ────────────────────────────────────────────
