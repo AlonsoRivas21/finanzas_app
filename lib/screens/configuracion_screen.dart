@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import '../screens/exportar_screen.dart';
-import '../screens/saldos_iniciales_screen.dart';
+import 'saldos_screen.dart';
 import '../widgets/sincronizar_widget.dart';
 import '../database/supabase_service.dart';
 
@@ -34,7 +34,7 @@ class ConfiguracionScreen extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) => const SaldosInicialesScreen()),
+                  builder: (_) => const SaldosScreen()),
             ),
           ),
           const SizedBox(height: 10),

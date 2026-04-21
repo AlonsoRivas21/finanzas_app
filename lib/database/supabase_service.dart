@@ -3,8 +3,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
 import 'database_helper.dart';
-import 'saldos_service.dart';
 import 'presupuesto_service.dart';
+import 'catalogo_service.dart';
 
 class SupabaseService {
   static final _client = Supabase.instance.client;
@@ -25,14 +25,14 @@ class SupabaseService {
     await _client.auth.signOut();
   }
 
-  // ── Subida: local → Supabase ──────────────────────────────────────────────
+  // ── Subida ────────────────────────────────────────────────────────────────
 
   static Future<int> subir() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
     final db  = DatabaseHelper();
     final uid = usuarioActual!.id;
 
-    // 1. Movimientos nuevos/editados
+    // 1. Movimientos
     final pendientes = await db.getNoSincronizados();
     if (pendientes.isNotEmpty) {
       final datos = pendientes.map((m) {
@@ -45,7 +45,7 @@ class SupabaseService {
       await db.marcarSincronizados(pendientes.map((m) => m.id).toList());
     }
 
-    // 2. Eliminaciones pendientes
+    // 2. Eliminaciones
     final eliminados = await db.getEliminadosPendientes();
     if (eliminados.isNotEmpty) {
       for (final id in eliminados) {
@@ -54,20 +54,19 @@ class SupabaseService {
       await db.limpiarEliminados();
     }
 
-    // 3. Presupuestos
+    // 3. Catálogo (cuentas y categorías)
+    await CatalogoService.subirCatalogo();
+
+    // 4. Presupuestos
     await PresupuestoService.subirPresupuestos();
 
-    // 4. Saldos iniciales
-    await SaldosService.subirSaldos();
-
-    // 5. Recalcular saldos_cuentas en Supabase desde historial completo
-    // Esto garantiza consistencia después de subir movimientos offline
+    // 5. Recalcular saldos_cuentas en Supabase
     await _recalcularSaldosEnSupabase(uid);
 
     return pendientes.length;
   }
 
-  // ── Bajada: Supabase → local ──────────────────────────────────────────────
+  // ── Bajada ────────────────────────────────────────────────────────────────
 
   static Future<int> bajar() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
@@ -79,7 +78,7 @@ class SupabaseService {
         .select()
         .eq('usuario_id', usuarioActual!.id)
         .order('fecha', ascending: false)
-        .limit(5000); // <-- Cambiar despues
+        .limit(5000);
 
     final movimientos = (response as List).map((row) => Movimiento.fromMap({
       'id':          row['id'],
@@ -97,20 +96,18 @@ class SupabaseService {
     await db.clearAll();
     if (movimientos.isNotEmpty) await db.insertMovimientos(movimientos);
 
-    // 2. Presupuestos
+    // 2. Catálogo
+    await CatalogoService.bajarCatalogo();
+
+    // 3. Presupuestos
     await PresupuestoService.bajarPresupuestos();
 
-    // 3. Saldos iniciales
-    await SaldosService.bajarSaldos();
-
-    // 4. Bajar saldos_cuentas de Supabase al local
-    // Así el cel tiene saldos correctos sin recalcular desde historial
+    // 4. Saldos actuales desde Supabase → local
     await _bajarSaldosAlLocal();
 
     return movimientos.length;
   }
 
-  /// Baja saldos_cuentas de Supabase y los guarda en SQLite local
   static Future<void> _bajarSaldosAlLocal() async {
     try {
       final res = await _client
@@ -119,29 +116,31 @@ class SupabaseService {
           .eq('usuario_id', usuarioActual!.id);
 
       if ((res as List).isNotEmpty) {
-        final saldos = <String, double>{};
-        for (final row in res) {
-          saldos[row['cuenta'] as String] =
-              (row['saldo_actual'] as num).toDouble();
-        }
+        final saldos = <String, double>{
+          for (final row in res)
+            row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
+        };
         await DatabaseHelper().guardarSaldosDesdeNube(saldos);
       }
     } catch (_) {}
   }
 
-  /// Recalcula saldos_cuentas en Supabase sumando historial completo
   static Future<void> _recalcularSaldosEnSupabase(String uid) async {
     try {
-      final initRes = await _client
-          .from('saldos_iniciales')
+      // Leer saldos_cuentas actuales (que incluyen el saldo inicial)
+      final saldosRes = await _client
+          .from('saldos_cuentas')
           .select()
           .eq('usuario_id', uid);
 
+      // Si no hay saldos base, partir de cero
       final saldos = <String, double>{};
-      for (final row in initRes as List) {
-        saldos[row['cuenta'] as String] = (row['saldo'] as num).toDouble();
+      for (final row in saldosRes as List) {
+        // Resetear a 0 para recalcular desde historial
+        saldos[row['cuenta'] as String] = 0;
       }
 
+      // Sumar todos los movimientos
       final movRes = await _client
           .from('movimientos')
           .select('cuenta, tipo, monto')
@@ -168,18 +167,23 @@ class SupabaseService {
     } catch (_) {}
   }
 
-  // ── Sincronización inteligente ────────────────────────────────────────────
+  // ── Sincronización ────────────────────────────────────────────────────────
 
   static Future<({String accion, int cantidad})> sincronizar() async {
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
     final db = DatabaseHelper();
-    final hayPendientes = (await db.getNoSincronizados()).isNotEmpty;
-    final hayEliminados = (await db.getEliminadosPendientes()).isNotEmpty;
+    final hayMovPend   = (await db.getNoSincronizados()).isNotEmpty;
+    final hayMovElim   = (await db.getEliminadosPendientes()).isNotEmpty;
+    final hayCuentaPend = (await db.getCuentasNoSincronizadas()).isNotEmpty;
+    final hayCuentaElim = (await db.getCuentasEliminadasPendientes()).isNotEmpty;
+    final hayCatPend   = (await db.getCategoriasNoSincronizadas()).isNotEmpty;
+    final hayCatElim   = (await db.getCategoriasEliminadasPendientes()).isNotEmpty;
     final hayPresupPend = (await PresupuestoService.getNoSincronizados()).isNotEmpty;
     final hayPresupElim = (await PresupuestoService.getEliminadosPendientes()).isNotEmpty;
 
-    if (hayPendientes || hayEliminados || hayPresupPend || hayPresupElim) {
+    if (hayMovPend || hayMovElim || hayCuentaPend || hayCuentaElim ||
+        hayCatPend || hayCatElim || hayPresupPend || hayPresupElim) {
       final cantidad = await subir();
       return (accion: 'subida', cantidad: cantidad);
     } else {

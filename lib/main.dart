@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config/app_config.dart';
 import 'models/movimientos_provider.dart';
 import 'screens/configuracion_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -13,14 +14,13 @@ import 'screens/gestion_screen.dart';
 import 'screens/presupuestos_screen.dart';
 import 'screens/auth_screen.dart';
 
-const supabaseUrl = 'https://deqkrupzguxsszcrpkcv.supabase.co';
-const supabaseAnonKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlcWtydXB6Z3V4c3N6Y3Jwa2N2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMTk1MDEsImV4cCI6MjA5MDY5NTUwMX0.DImUPQPhjX8rTxI05scNHLJE_0PI342rJcr0BpivCb0';
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('es', null);
-  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+  await Supabase.initialize(
+    url: AppConfig.supabaseUrl,
+    anonKey: AppConfig.supabaseAnonKey,
+  );
   runApp(const FinanzasApp());
 }
 
@@ -34,11 +34,13 @@ class FinanzasApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MovimientosProvider()),
       ],
       child: MaterialApp(
-        title: 'Mis Finanzas',
-        debugShowCheckedModeBanner: false,
+        title: 'Mis Finanzas${AppConfig.esDev ? ' [DEV]' : ''}',
+        debugShowCheckedModeBanner: AppConfig.esDev,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF2563EB),
+            seedColor: AppConfig.esDev
+                ? const Color(0xFF7C3AED) // Morado en DEV
+                : const Color(0xFF2563EB), // Azul en PROD
             brightness: Brightness.light,
           ),
           useMaterial3: true,
@@ -47,7 +49,9 @@ class FinanzasApp extends StatelessWidget {
         ),
         darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF2563EB),
+            seedColor: AppConfig.esDev
+                ? const Color(0xFF7C3AED)
+                : const Color(0xFF2563EB),
             brightness: Brightness.dark,
           ),
           useMaterial3: true,
@@ -202,13 +206,34 @@ class _WebHomeState extends State<_WebHome> {
                 alignment: Alignment.bottomCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: IconButton(
-                    icon: const Icon(Icons.logout),
-                    tooltip: 'Cerrar sesión',
-                    onPressed: () async {
-                      await Supabase.instance.client.auth.signOut();
-                      setState(() {});
-                    },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Indicador de entorno
+                      if (AppConfig.esDev)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade100,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text('DEV',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.purple.shade700)),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.logout),
+                        tooltip: 'Cerrar sesión',
+                        onPressed: () async {
+                          await Supabase.instance.client.auth.signOut();
+                          setState(() {});
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ),
