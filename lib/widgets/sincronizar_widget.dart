@@ -36,6 +36,7 @@ class _SincronizarWidgetState extends State<SincronizarWidget> {
         await prov.cargar();
 
         final esSubida = res.accion == 'subida';
+        // ignore: use_build_context_synchronously
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(children: [

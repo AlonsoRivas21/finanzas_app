@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import '../screens/exportar_screen.dart';
 import 'saldos_screen.dart';
 import '../widgets/sincronizar_widget.dart';
-import '../database/supabase_service.dart';
 
 class ConfiguracionScreen extends StatelessWidget {
   const ConfiguracionScreen({super.key});
@@ -17,14 +16,14 @@ class ConfiguracionScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           // ── Nube ──────────────────────────────────────────────────────
-          _SeccionTitulo('Nube'),
+          const _SeccionTitulo('Nube'),
           const SizedBox(height: 8),
           const SincronizarWidget(),
 
           const SizedBox(height: 24),
 
           // ── Datos ─────────────────────────────────────────────────────
-          _SeccionTitulo('Datos'),
+          const _SeccionTitulo('Datos'),
           const SizedBox(height: 8),
           _OpcionTile(
             icono: Icons.account_balance_wallet_outlined,
@@ -52,7 +51,7 @@ class ConfiguracionScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // ── App ───────────────────────────────────────────────────────
-          _SeccionTitulo('App'),
+          const _SeccionTitulo('App'),
           const SizedBox(height: 8),
           _OpcionTile(
             icono: Icons.install_mobile_outlined,
@@ -131,6 +130,7 @@ class _OpcionTile extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
+          // ignore: deprecated_member_use
           color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -174,8 +174,8 @@ class _ApkSheet extends StatelessWidget {
                     fontSize: 16, fontWeight: FontWeight.w600)),
           ]),
           const SizedBox(height: 20),
-          _Paso('1', 'Abre una terminal en la carpeta del proyecto'),
-          _Paso('2', 'Ejecuta este comando:'),
+          const _Paso('1', 'Abre una terminal en la carpeta del proyecto'),
+          const _Paso('2', 'Ejecuta este comando:'),
           Container(
             margin: const EdgeInsets.symmetric(vertical: 8),
             padding: const EdgeInsets.all(12),
@@ -191,7 +191,7 @@ class _ApkSheet extends StatelessWidget {
                   fontSize: 13),
             ),
           ),
-          _Paso('3', 'El APK quedará en:'),
+          const _Paso('3', 'El APK quedará en:'),
           Container(
             margin: const EdgeInsets.symmetric(vertical: 8),
             padding: const EdgeInsets.all(12),
@@ -207,7 +207,7 @@ class _ApkSheet extends StatelessWidget {
                   fontSize: 12),
             ),
           ),
-          _Paso('4',
+          const _Paso('4',
               'Copia el APK a tu teléfono e instálalo. '
               'Puede que necesites activar "Instalar apps de fuentes desconocidas" en Ajustes del teléfono.'),
           const SizedBox(height: 16),

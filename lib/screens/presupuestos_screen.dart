@@ -366,6 +366,7 @@ class _PresupuestoCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(12),
         color: excedido
+            // ignore: deprecated_member_use
             ? Colors.red.shade50.withOpacity(0.5)
             : null,
       ),
@@ -573,7 +574,7 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
         key: _formKey,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(
-            value: _nombre,
+            initialValue: _nombre,
             decoration: InputDecoration(
                 labelText: label, border: const OutlineInputBorder()),
             items: _opciones

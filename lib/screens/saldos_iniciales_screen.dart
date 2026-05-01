@@ -27,7 +27,9 @@ class _SaldosInicialesScreenState extends State<SaldosInicialesScreen> {
 
   @override
   void dispose() {
-    for (final c in _controllers.values) c.dispose();
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 

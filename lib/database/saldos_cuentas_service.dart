@@ -31,7 +31,7 @@ class SaldosCuentasService {
 
   // ── Supabase — se usa al sincronizar ─────────────────────────────────────
 
-  /// Recalcula saldos en Supabase sumando TODO el historial
+  /// Recalcula saldos en Supabase sumando el historial completo
   /// Se llama al sincronizar para mantener saldos_cuentas actualizado
   static Future<void> recalcularDesdeHistorial() async {
     if (!_autenticado) return;

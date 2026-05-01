@@ -141,7 +141,7 @@ class _ExportarScreenState extends State<ExportarScreen> {
                         color: Colors.grey.shade600)),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<int>(
-                  value: _anioSeleccionado,
+                  initialValue: _anioSeleccionado,
                   decoration: const InputDecoration(
                       border: OutlineInputBorder()),
                   items: _anios

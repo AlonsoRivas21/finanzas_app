@@ -457,8 +457,11 @@ class DatabaseHelper {
     ''', [mes, anio]);
     double ingresos = 0, egresos = 0;
     for (final row in result) {
-      if (row['tipo'] == 'ingreso') ingresos = (row['total'] as num).toDouble();
-      else egresos = (row['total'] as num).toDouble();
+      if (row['tipo'] == 'ingreso') {
+        ingresos = (row['total'] as num).toDouble();
+      } else {
+        egresos = (row['total'] as num).toDouble();
+      }
     }
     return {'ingresos': ingresos, 'egresos': egresos};
   }
@@ -479,8 +482,11 @@ class DatabaseHelper {
       final tipo   = row['tipo'] as String;
       final total  = (row['total'] as num).toDouble();
       mapa.putIfAbsent(cuenta, () => {'ingresos': 0.0, 'egresos': 0.0});
-      if (tipo == 'ingreso') mapa[cuenta]!['ingresos'] = total;
-      else mapa[cuenta]!['egresos'] = total;
+      if (tipo == 'ingreso') {
+        mapa[cuenta]!['ingresos'] = total;
+      } else {
+        mapa[cuenta]!['egresos'] = total;
+      }
     }
     return mapa;
   }
@@ -520,8 +526,11 @@ class DatabaseHelper {
       final s     = row['semana'] as int;
       final tipo  = row['tipo'] as String;
       final total = (row['total'] as num).toDouble();
-      if (tipo == 'ingreso') semanas[s]['ingresos'] = total;
-      else semanas[s]['egresos'] = total;
+      if (tipo == 'ingreso') {
+        semanas[s]['ingresos'] = total;
+      } else {
+        semanas[s]['egresos'] = total;
+      }
     }
     return semanas.where((s) =>
         (s['ingresos'] as double) > 0 ||

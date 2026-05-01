@@ -190,8 +190,11 @@ class DataRepository {
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
       final monto = (row['monto'] as num).toDouble();
-      if (row['tipo'] == 'ingreso') ingresos += monto;
-      else egresos += monto;
+      if (row['tipo'] == 'ingreso') {
+        ingresos += monto;
+      } else {
+        egresos += monto;
+      }
     }
     return {'ingresos': ingresos, 'egresos': egresos};
   }

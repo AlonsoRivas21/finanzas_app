@@ -148,6 +148,7 @@ class _CuentasTabState extends State<_CuentasTab> {
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
+                          // ignore: deprecated_member_use
                           backgroundColor: color.withOpacity(0.1),
                           child: Icon(icono, color: color, size: 20),
                         ),
@@ -248,8 +249,10 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -271,7 +274,7 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _tipo,
+            initialValue: _tipo,
             decoration: const InputDecoration(
                 labelText: 'Tipo', border: OutlineInputBorder()),
             items: const [
@@ -402,6 +405,7 @@ class _CategoriasTabState extends State<_CategoriasTab> {
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
+                          // ignore: deprecated_member_use
                           backgroundColor: color.withOpacity(0.1),
                           child: Icon(_iconoDesdeString(cat['icono'] as String? ?? 'label'),
                               color: color, size: 18),
@@ -547,8 +551,10 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -570,7 +576,7 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _tipo,
+            initialValue: _tipo,
             decoration: const InputDecoration(
                 labelText: 'Aplica a', border: OutlineInputBorder()),
             items: const [

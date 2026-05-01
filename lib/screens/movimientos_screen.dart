@@ -37,7 +37,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
 
   void _abrirImportar() {
     Navigator.push(context,
-        MaterialPageRoute(builder: (_) => ImportarExcelScreen()));
+        MaterialPageRoute(builder: (_) => const ImportarExcelScreen()));
   }
 
   @override
@@ -145,7 +145,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => FormMovimientoScreen())),
+            MaterialPageRoute(builder: (_) => const FormMovimientoScreen())),
         icon: const Icon(Icons.add),
         label: const Text('Nuevo'),
       ),
@@ -210,6 +210,7 @@ class _Chip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
+          // ignore: deprecated_member_use
           color: selected ? c.withOpacity(0.15) : Colors.transparent,
           border: Border.all(color: selected ? c : Colors.grey.shade300),
           borderRadius: BorderRadius.circular(20),
@@ -282,7 +283,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => FormMovimientoScreen())),
+                MaterialPageRoute(builder: (_) => const FormMovimientoScreen())),
             icon: const Icon(Icons.add),
             label: const Text('Agregar primero'),
           ),

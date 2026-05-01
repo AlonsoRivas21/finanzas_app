@@ -54,6 +54,7 @@ class MovimientoTile extends StatelessWidget {
               builder: (_) => FormMovimientoScreen(movimiento: m)),
         ),
         leading: CircleAvatar(
+          // ignore: deprecated_member_use
           backgroundColor: color.withOpacity(0.12),
           child: Icon(_iconoCategoria(m.categoria), color: color, size: 20),
         ),

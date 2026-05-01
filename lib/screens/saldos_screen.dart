@@ -3,7 +3,6 @@
 // Ahora maneja saldos ACTUALES directamente
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../database/catalogo_service.dart';
 
@@ -28,7 +27,9 @@ class _SaldosScreenState extends State<SaldosScreen> {
 
   @override
   void dispose() {
-    for (final c in _controllers.values) c.dispose();
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -70,8 +71,6 @@ class _SaldosScreenState extends State<SaldosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = NumberFormat('#,##0.00', 'es');
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Saldos actuales'),
