@@ -75,10 +75,11 @@ class _MobileHome extends StatefulWidget {
 class _MobileHomeState extends State<_MobileHome> {
   int _index = 0;
 
-  final _screens = const [
+final _screens = const [
     DashboardScreen(),
     MovimientosScreen(),
     PresupuestosScreen(),
+    GestionScreen(),
   ];
 
   Future<void> _abrirConfiguracion() async {
@@ -98,7 +99,7 @@ class _MobileHomeState extends State<_MobileHome> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) {
-          if (i == 3) {
+          if (i == 4) {
             _abrirConfiguracion();
           } else {
             setState(() => _index = i);
@@ -119,6 +120,11 @@ class _MobileHomeState extends State<_MobileHome> {
             icon: Icon(Icons.savings_outlined),
             selectedIcon: Icon(Icons.savings),
             label: 'Presupuestos',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.manage_accounts_outlined),
+            selectedIcon: Icon(Icons.manage_accounts),
+            label: 'Gestión',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
