@@ -103,6 +103,7 @@ class _CuentasScreenState extends State<CuentasScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
                 value: tipo,
                 decoration: const InputDecoration(labelText: 'Tipo'),
                 items: const [
@@ -133,6 +134,7 @@ class _CuentasScreenState extends State<CuentasScreen> {
                   });
                 }
                 if (mounted) {
+                  // ignore: use_build_context_synchronously
                   Navigator.pop(ctx);
                   _cargar();
                 }

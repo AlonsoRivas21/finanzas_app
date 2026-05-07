@@ -10,7 +10,6 @@ import '../widgets/movimiento_tile.dart';
 import '../widgets/resumen_bar.dart';
 import 'form_movimiento_screen.dart';
 import 'importar_excel_screen.dart';
-import '../database/catalogo_service.dart';
 
 class MovimientosScreen extends StatefulWidget {
   const MovimientosScreen({super.key});

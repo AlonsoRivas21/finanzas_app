@@ -181,6 +181,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const _SectionLabel('Categoría'),
       const SizedBox(height: 8),
       DropdownButtonFormField<CategoriaModel>(
+        // ignore: deprecated_member_use
         value: _categoria,
         decoration: const InputDecoration(border: OutlineInputBorder()),
         items: _categorias.map((c) =>
@@ -192,6 +193,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const _SectionLabel('Cuenta'),
       const SizedBox(height: 8),
       DropdownButtonFormField<CuentaModel>(
+        // ignore: deprecated_member_use
         value: _cuenta,
         decoration: const InputDecoration(border: OutlineInputBorder()),
         items: _cuentas.map((c) =>
@@ -240,6 +242,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const _SectionLabel('Cuenta origen'),
       const SizedBox(height: 8),
       DropdownButtonFormField<CuentaModel>(
+        // ignore: deprecated_member_use
         value: _cuenta,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
@@ -256,6 +259,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const _SectionLabel('Cuenta destino'),
       const SizedBox(height: 8),
       DropdownButtonFormField<CuentaModel>(
+        // ignore: deprecated_member_use
         value: _cuentaDestino,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
@@ -439,6 +443,7 @@ class _TipoBtn extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
+            // ignore: deprecated_member_use
             color: selected ? c.withOpacity(0.12) : Colors.transparent,
             border: Border.all(color: selected ? c : Colors.grey.shade300, width: 1.5),
             borderRadius: BorderRadius.circular(10),
@@ -470,13 +475,16 @@ class _CuentaPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
+        // ignore: deprecated_member_use
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(20),
+        // ignore: deprecated_member_use
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(nombre, style: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w600,
+        // ignore: deprecated_member_use
         color: color.withOpacity(0.8),
       )),
     );

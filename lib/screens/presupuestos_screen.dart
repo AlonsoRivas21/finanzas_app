@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/presupuesto_service.dart';
 import '../database/catalogo_service.dart';
-import '../models/movimiento.dart';
 
 class PresupuestosScreen extends StatefulWidget {
   const PresupuestosScreen({super.key});
@@ -582,6 +581,7 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
         key: _formKey,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(
+            // ignore: deprecated_member_use
             value: _nombre,
             decoration: InputDecoration(
                 labelText: label, border: const OutlineInputBorder()),
