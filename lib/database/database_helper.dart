@@ -351,7 +351,7 @@ class DatabaseHelper {
     await database.insert('movimientos', m.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace);
     final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-    await aplicarDeltaSaldo(m.cuenta.nombre, delta);
+    await aplicarDeltaSaldo(m.cuentaNombre, delta);
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
@@ -364,7 +364,7 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
     for (final m in lista) {
       final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-      await aplicarDeltaSaldo(m.cuenta.nombre, delta);
+      await aplicarDeltaSaldo(m.cuentaNombre, delta);
     }
   }
 
@@ -376,13 +376,13 @@ class DatabaseHelper {
       final anterior = Movimiento.fromMap(rows.first);
       final deltaAnterior = anterior.tipo == TipoMovimiento.ingreso
           ? -anterior.monto : anterior.monto;
-      await aplicarDeltaSaldo(anterior.cuenta.nombre, deltaAnterior);
+      await aplicarDeltaSaldo(anterior.cuentaNombre, deltaAnterior);
     }
     await database.update('movimientos', nuevo.toMap(),
         where: 'id = ?', whereArgs: [nuevo.id]);
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso
         ? nuevo.monto : -nuevo.monto;
-    await aplicarDeltaSaldo(nuevo.cuenta.nombre, deltaNuevo);
+    await aplicarDeltaSaldo(nuevo.cuentaNombre, deltaNuevo);
   }
 
   Future<void> deleteMovimiento(String id) async {
@@ -392,7 +392,7 @@ class DatabaseHelper {
     if (rows.isNotEmpty) {
       final m = Movimiento.fromMap(rows.first);
       final delta = m.tipo == TipoMovimiento.ingreso ? -m.monto : m.monto;
-      await aplicarDeltaSaldo(m.cuenta.nombre, delta);
+      await aplicarDeltaSaldo(m.cuentaNombre, delta);
     }
     await database.delete('movimientos', where: 'id = ?', whereArgs: [id]);
     await database.insert('movimientos_eliminados',

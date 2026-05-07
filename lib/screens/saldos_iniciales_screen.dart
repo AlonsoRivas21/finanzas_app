@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import '../database/saldos_service.dart';
-import '../models/movimiento.dart';
+import '../database/catalogo_service.dart';
 
 class SaldosInicialesScreen extends StatefulWidget {
   const SaldosInicialesScreen({super.key});
@@ -13,15 +13,13 @@ class SaldosInicialesScreen extends StatefulWidget {
 
 class _SaldosInicialesScreenState extends State<SaldosInicialesScreen> {
   final Map<String, TextEditingController> _controllers = {};
+  List<Map<String, dynamic>> _cuentas = [];
   bool _cargando = true;
   bool _guardando = false;
 
   @override
   void initState() {
     super.initState();
-    for (final c in Cuenta.values) {
-      _controllers[c.nombre] = TextEditingController();
-    }
     _cargar();
   }
 
@@ -34,12 +32,15 @@ class _SaldosInicialesScreenState extends State<SaldosInicialesScreen> {
   }
 
   Future<void> _cargar() async {
+    final cuentas = await CatalogoService.getCuentas();
     final saldos = await SaldosService.getSaldosIniciales();
-    for (final entry in saldos.entries) {
-      _controllers[entry.key]?.text =
-          entry.value == 0 ? '' : entry.value.toString();
+    for (final c in cuentas) {
+      final nombre = c['nombre'] as String;
+      _controllers[nombre] = TextEditingController(
+        text: saldos[nombre] == null || saldos[nombre] == 0 ? '' : saldos[nombre]!.toString(),
+      );
     }
-    setState(() => _cargando = false);
+    setState(() { _cuentas = cuentas; _cargando = false; });
   }
 
   Future<void> _guardar() async {
@@ -101,11 +102,12 @@ class _SaldosInicialesScreenState extends State<SaldosInicialesScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                ...Cuenta.values.map((c) => Padding(
+                ..._cuentas.map((c) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: _CampoSaldo(
-                    cuenta: c,
-                    controller: _controllers[c.nombre]!,
+                    nombre: c['nombre'],
+                    tipo: c['tipo'],
+                    controller: _controllers[c['nombre']]!,
                   ),
                 )),
               ],
@@ -115,14 +117,14 @@ class _SaldosInicialesScreenState extends State<SaldosInicialesScreen> {
 }
 
 class _CampoSaldo extends StatelessWidget {
-  final Cuenta cuenta;
+  final String nombre;
+  final String tipo;
   final TextEditingController controller;
-  const _CampoSaldo({required this.cuenta, required this.controller});
+  const _CampoSaldo({required this.nombre, required this.tipo, required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    final esTarjeta =
-        cuenta == Cuenta.creditoBa || cuenta == Cuenta.creditoNiu;
+    final esTarjeta = tipo == 'credito';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -132,7 +134,7 @@ class _CampoSaldo extends StatelessWidget {
             size: 16, color: Colors.grey.shade600,
           ),
           const SizedBox(width: 6),
-          Text(cuenta.nombre,
+          Text(nombre,
               style: const TextStyle(
                   fontWeight: FontWeight.w600, fontSize: 14)),
           if (esTarjeta) ...[

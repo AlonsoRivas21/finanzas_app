@@ -12,6 +12,33 @@ class CatalogoService {
   static String get _uid => _client.auth.currentUser?.id ?? '';
   static bool get _autenticado => _client.auth.currentUser != null;
 
+  // Auxiliares para conversión segura entre SQLite (int) y Supabase (bool)
+  static bool _toBool(dynamic val) {
+    if (val is bool) return val;
+    if (val is int) return val == 1;
+    return false;
+  }
+
+  static int _toInt(dynamic val) {
+    if (val is int) return val;
+    if (val is bool) return val ? 1 : 0;
+    return 0;
+  }
+
+  // Normalización para que la UI reciba siempre los mismos tipos
+  static Map<String, dynamic> _normCuenta(Map<String, dynamic> c) => {
+    ...c,
+    'activa': _toBool(c['activa']),
+    'saldo_inicial': (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0,
+    'orden': c['orden'] ?? 0,
+  };
+
+  static Map<String, dynamic> _normCat(Map<String, dynamic> c) => {
+    ...c,
+    'activa': _toBool(c['activa']),
+    'orden': c['orden'] ?? 0,
+  };
+
   // ── Predeterminados ───────────────────────────────────────────────────────
 
   static List<Map<String, dynamic>> get _cuentasPredeterminadas => [
@@ -53,7 +80,7 @@ class CatalogoService {
       }
       cuentas = await db.getCuentas();
     }
-    return cuentas;
+    return cuentas.map(_normCuenta).toList();
   }
 
   static Future<List<Map<String, dynamic>>> _getCuentasWeb() async {
@@ -70,14 +97,14 @@ class CatalogoService {
       await _crearCuentasPredeterminadasEnSupabase();
       return _getCuentasWeb();
     }
-    return List<Map<String, dynamic>>.from(res);
+    return List<Map<String, dynamic>>.from(res).map(_normCuenta).toList();
   }
 
   static Future<void> _crearCuentasPredeterminadasEnSupabase() async {
     final rows = _cuentasPredeterminadas.map((c) => {
       ...c,
       'usuario_id': _uid,
-      'activa': true,
+      'activa': true, // Supabase espera bool
     }).toList();
     await _client.from('cuentas').insert(rows);
   }
@@ -108,10 +135,19 @@ class CatalogoService {
   static Future<void> actualizarCuenta(Map<String, dynamic> cuenta) async {
     if (kIsWeb) {
       await _client.from('cuentas')
-          .update({...cuenta, 'activa': true})
+          .update({
+            'nombre': cuenta['nombre'],
+            'tipo': cuenta['tipo'],
+            'saldo_inicial': cuenta['saldo_inicial'],
+            'activa': _toBool(cuenta['activa']),
+          })
           .eq('id', cuenta['id']);
     } else {
-      await DatabaseHelper().updateCuenta({...cuenta, 'sincronizado': 0});
+      await DatabaseHelper().updateCuenta({
+        ...cuenta,
+        'activa': _toInt(cuenta['activa']),
+        'sincronizado': 0
+      });
     }
   }
 
@@ -137,7 +173,7 @@ class CatalogoService {
       }
       cats = await db.getCategorias(tipo: tipo);
     }
-    return cats;
+    return cats.map(_normCat).toList();
   }
 
   static Future<List<Map<String, dynamic>>> _getCategoriasWeb({String? tipo}) async {
@@ -155,20 +191,20 @@ class CatalogoService {
       await _crearCategoriasPredeterminadasEnSupabase();
       return _getCategoriasWeb(tipo: tipo);
     }
-
-    var lista = List<Map<String, dynamic>>.from(res);
+    
+    var lista = List<Map<String, dynamic>>.from(res).map(_normCat).toList();
     if (tipo != null) {
       lista = lista.where((c) =>
           c['tipo'] == tipo || c['tipo'] == 'ambos').toList();
     }
-    return lista;
+    return lista.toList();
   }
 
   static Future<void> _crearCategoriasPredeterminadasEnSupabase() async {
     final rows = _categoriasPredeterminadas.map((c) => {
       ...c,
       'usuario_id': _uid,
-      'activa': true,
+      'activa': true, // Supabase espera bool
     }).toList();
     await _client.from('categorias').insert(rows);
   }
@@ -199,10 +235,19 @@ class CatalogoService {
   static Future<void> actualizarCategoria(Map<String, dynamic> cat) async {
     if (kIsWeb) {
       await _client.from('categorias')
-          .update({...cat, 'activa': true})
+          .update({
+            'nombre': cat['nombre'],
+            'tipo': cat['tipo'],
+            'icono': cat['icono'],
+            'activa': _toBool(cat['activa']),
+          })
           .eq('id', cat['id']);
     } else {
-      await DatabaseHelper().updateCategoria({...cat, 'sincronizado': 0});
+      await DatabaseHelper().updateCategoria({
+        ...cat,
+        'activa': _toInt(cat['activa']),
+        'sincronizado': 0
+      });
     }
   }
 
@@ -223,11 +268,14 @@ class CatalogoService {
     // Cuentas
     final cuentasPend = await db.getCuentasNoSincronizadas();
     if (cuentasPend.isNotEmpty) {
-      final rows = cuentasPend.map((c) => {
-        ...c, 'usuario_id': _uid,
-        'activa': c['activa'] == 1,
-        'sincronizado': null,
-      }..remove('sincronizado')).toList();
+      final rows = cuentasPend.map((c) {
+        final map = Map<String, dynamic>.from(c);
+        map['usuario_id'] = _uid;
+        map['activa'] = _toBool(c['activa']);
+        map.remove('sincronizado');
+        return map;
+      }).toList();
+      
       await _client.from('cuentas').upsert(rows, onConflict: 'id');
       await db.marcarCuentasSincronizadas(
           cuentasPend.map((c) => c['id'] as String).toList());
@@ -244,11 +292,14 @@ class CatalogoService {
     // Categorías
     final catsPend = await db.getCategoriasNoSincronizadas();
     if (catsPend.isNotEmpty) {
-      final rows = catsPend.map((c) => {
-        ...c, 'usuario_id': _uid,
-        'activa': c['activa'] == 1,
-        'sincronizado': null,
-      }..remove('sincronizado')).toList();
+      final rows = catsPend.map((c) {
+        final map = Map<String, dynamic>.from(c);
+        map['usuario_id'] = _uid;
+        map['activa'] = _toBool(c['activa']);
+        map.remove('sincronizado');
+        return map;
+      }).toList();
+
       await _client.from('categorias').upsert(rows, onConflict: 'id');
       await db.marcarCategoriasSincronizadas(
           catsPend.map((c) => c['id'] as String).toList());
@@ -279,7 +330,7 @@ class CatalogoService {
         'nombre':        c['nombre'],
         'tipo':          c['tipo'],
         'saldo_inicial': (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0,
-        'activa':        c['activa'] == true ? 1 : 0,
+        'activa':        _toBool(c['activa']) ? 1 : 0,
         'orden':         c['orden'] ?? 0,
         'sincronizado':  1,
       }).toList();
@@ -298,7 +349,7 @@ class CatalogoService {
         'nombre':       c['nombre'],
         'tipo':         c['tipo'],
         'icono':        c['icono'] ?? 'label',
-        'activa':       c['activa'] == true ? 1 : 0,
+        'activa':       _toBool(c['activa']) ? 1 : 0,
         'orden':        c['orden'] ?? 0,
         'sincronizado': 1,
       }).toList();

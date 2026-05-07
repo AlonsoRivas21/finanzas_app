@@ -40,8 +40,10 @@ class DataRepository {
     if (busqueda != null && busqueda.isNotEmpty) {
       final q = busqueda.toLowerCase();
       lista = lista.where((m) =>
-        m.categoria.nombre.toLowerCase().contains(q) ||
-        m.cuenta.nombre.toLowerCase().contains(q) ||
+
+        m.categoriaNombre.toLowerCase().contains(q) ||
+        m.cuentaNombre.toLowerCase().contains(q) ||
+
         (m.comentario?.toLowerCase().contains(q) ?? false)
       ).toList();
     }
@@ -56,7 +58,7 @@ class DataRepository {
     await _client.from('movimientos').upsert(_toRow(m));
     // Aplicar delta: sumar el monto al saldo de la cuenta
     final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-    await _aplicarDeltaSaldo(m.cuenta.nombre, delta);
+    await _aplicarDeltaSaldo(m.cuenta, delta);
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
@@ -68,7 +70,7 @@ class DataRepository {
     // Aplicar delta por cada movimiento
     for (final m in lista) {
       final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-      await _aplicarDeltaSaldo(m.cuenta.nombre, delta);
+      await _aplicarDeltaSaldo(m.cuenta, delta);
     }
   }
 
@@ -95,7 +97,7 @@ class DataRepository {
     }
     // Aplicar el efecto del movimiento nuevo
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso ? nuevo.monto : -nuevo.monto;
-    await _aplicarDeltaSaldo(nuevo.cuenta.nombre, deltaNuevo);
+    await _aplicarDeltaSaldo(nuevo.cuenta, deltaNuevo);
   }
 
   Future<void> deleteMovimiento(String id) async {

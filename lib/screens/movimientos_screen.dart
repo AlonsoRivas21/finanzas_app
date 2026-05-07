@@ -1,5 +1,6 @@
 // lib/screens/movimientos_screen.dart
 
+import 'package:finanzas_app/database/catalogo_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +10,7 @@ import '../widgets/movimiento_tile.dart';
 import '../widgets/resumen_bar.dart';
 import 'form_movimiento_screen.dart';
 import 'importar_excel_screen.dart';
+import '../database/catalogo_service.dart';
 
 class MovimientosScreen extends StatefulWidget {
   const MovimientosScreen({super.key});
@@ -20,13 +22,28 @@ class MovimientosScreen extends StatefulWidget {
 class _MovimientosScreenState extends State<MovimientosScreen> {
   final _searchCtrl = TextEditingController();
   bool _mostrarBusqueda = false;
+  List<Map<String, dynamic>> _cuentas = []; 
 
   @override
   void initState() {
     super.initState();
+    _cargarCuentas();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<MovimientosProvider>().cargar();
     });
+  }
+
+  Future<void> _cargarCuentas() async {
+    try {
+      final cuentas = await CatalogoService.getCuentas();
+      if (mounted) {
+        setState(() {
+          _cuentas = cuentas;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error al cargar cuentas: $e');
+    }
   }
 
   @override
@@ -131,7 +148,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
       body: Column(
         children: [
           ResumenBar(mes: prov.mesActual),
-          _FiltrosRapidos(prov: prov),
+          _FiltrosRapidos(prov: prov, cuentas: _cuentas),
           Expanded(
             child: prov.cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -155,7 +172,8 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
 
 class _FiltrosRapidos extends StatelessWidget {
   final MovimientosProvider prov;
-  const _FiltrosRapidos({required this.prov});
+  final List<Map<String, dynamic>> cuentas;
+  const _FiltrosRapidos({required this.prov, required this.cuentas});
 
   @override
   Widget build(BuildContext context) {
@@ -178,13 +196,13 @@ class _FiltrosRapidos extends StatelessWidget {
               onTap: () => prov.setFiltroTipo(
                   prov.filtroTipo == 'egreso' ? null : 'egreso')),
           const SizedBox(width: 8),
-          ...Cuenta.values.map((c) => Padding(
+          ...cuentas.map((c) => Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _Chip(
-              label: c.nombre,
-              selected: prov.filtroCuenta == c.nombre,
+              label: c['nombre'] as String,
+              selected: prov.filtroCuenta == c['nombre'],
               onTap: () => prov.setFiltroCuenta(
-                  prov.filtroCuenta == c.nombre ? null : c.nombre),
+                  prov.filtroCuenta == c['nombre'] ? null : c['nombre'] as String),
             ),
           )),
         ],

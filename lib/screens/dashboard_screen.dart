@@ -559,9 +559,9 @@ class _UltimosMovimientos extends StatelessWidget {
           final color = esIngreso ? Colors.green : Colors.red;
           return ListTile(
             dense: true,
-            title: Text(m.categoria.nombre,
+            title: Text(m.categoria,
                 style: const TextStyle(fontSize: 13)),
-            subtitle: Text(m.cuenta.nombre,
+            subtitle: Text(m.cuenta,
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
             trailing: Text(
               '${esIngreso ? '+' : '-'}\$${fmt.format(m.monto)}',

@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../models/movimiento.dart';
 import '../models/movimientos_provider.dart';
 
 class ResumenBar extends StatelessWidget {
@@ -22,12 +21,12 @@ class ResumenBar extends StatelessWidget {
 
         final saldos = snap.data!;
 
-        final efectivo  = saldos[Cuenta.billetera.nombre] ?? 0;
-        final bancos    = (saldos[Cuenta.debitoBa.nombre] ?? 0) +
-                          (saldos[Cuenta.debitoNiu.nombre] ?? 0);
-        final ahorro    = saldos[Cuenta.multimoney.nombre] ?? 0;
-        final deudaBa   = saldos[Cuenta.creditoBa.nombre] ?? 0;
-        final deudaNiu  = saldos[Cuenta.creditoNiu.nombre] ?? 0;
+        final efectivo  = saldos['BILLETERA'] ?? 0;
+        final bancos    = (saldos['DEBITO BA'] ?? 0) +
+                          (saldos['DEBITO NIU'] ?? 0);
+        final ahorro    = saldos['MULTIMONEY'] ?? 0;
+        final deudaBa   = saldos['CREDITO BA'] ?? 0;
+        final deudaNiu  = saldos['CREDITO NIU'] ?? 0;
         final deudaTotal = (deudaBa + deudaNiu).abs();
         final hayDeuda  = deudaBa < 0 || deudaNiu < 0;
 

@@ -56,15 +56,17 @@ class MovimientoTile extends StatelessWidget {
         leading: CircleAvatar(
           // ignore: deprecated_member_use
           backgroundColor: color.withOpacity(0.12),
-          child: Icon(_iconoCategoria(m.categoria), color: color, size: 20),
+          child: Icon(_iconoCategoria(m.categoriaNombre), color: color, size: 20),
         ),
+
         title: Text(
-          m.categoria.nombre,
+          m.categoriaNombre,
           style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
         ),
         subtitle: Text(
-          '${m.cuenta.nombre}${m.comentario != null ? ' · ${m.comentario}' : ''}',
+          '${m.cuentaNombre}${m.comentario != null ? ' · ${m.comentario}' : ''}',
           maxLines: 1,
+
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
         ),
@@ -88,20 +90,21 @@ class MovimientoTile extends StatelessWidget {
     );
   }
 
-  IconData _iconoCategoria(Categoria cat) {
-    switch (cat) {
-      case Categoria.ingresos:        return Icons.savings;
-      case Categoria.transporte:      return Icons.directions_bus;
-      case Categoria.comerFuera:      return Icons.restaurant;
-      case Categoria.transferencia:   return Icons.swap_horiz;
-      case Categoria.servicios:       return Icons.receipt;
-      case Categoria.shopping:        return Icons.shopping_bag;
-      case Categoria.saldo:           return Icons.account_balance_wallet;
-      case Categoria.hogar:           return Icons.home;
-      case Categoria.proviciones:     return Icons.shopping_cart;
-      case Categoria.perdido:         return Icons.money_off;
-      case Categoria.entretenimiento: return Icons.movie;
-      case Categoria.pelo:            return Icons.content_cut;
+IconData _iconoCategoria(String catNombre) {
+    switch (catNombre) {
+      case 'INGRESOS':        return Icons.savings;
+      case 'TRANSPORTE':      return Icons.directions_bus;
+      case 'COMER FUERA':     return Icons.restaurant;
+      case 'TRANSFERENCIA':   return Icons.swap_horiz;
+      case 'SERVICIOS':       return Icons.receipt;
+      case 'SHOPPING':        return Icons.shopping_bag;
+      case 'SALDO':           return Icons.account_balance_wallet;
+      case 'HOGAR':           return Icons.home;
+      case 'PROVICIONES':     return Icons.shopping_cart;
+      case 'PERDIDO':         return Icons.money_off;
+      case 'ENTRETENIMIENTO': return Icons.movie;
+      case 'PELO':            return Icons.content_cut;
+      default:                return Icons.label;
     }
   }
 }

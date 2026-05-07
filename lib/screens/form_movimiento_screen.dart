@@ -1,10 +1,12 @@
-// lib/screens/form_movimiento_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/movimiento.dart';
 import '../models/movimientos_provider.dart';
+import '../models/categoria_model.dart';
+import '../models/cuenta_model.dart';
+import '../database/catalogo_service.dart';
 
 enum _ModoFormulario { movimiento, transferencia }
 
@@ -23,27 +25,29 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
 
   _ModoFormulario _modo = _ModoFormulario.movimiento;
   TipoMovimiento _tipo = TipoMovimiento.egreso;
-  Categoria _categoria = Categoria.transporte;
-  Cuenta _cuenta = Cuenta.billetera;
-  Cuenta _cuentaDestino = Cuenta.debitoBa;
+  CategoriaModel? _categoria;
+  CuentaModel? _cuenta;
+  CuentaModel? _cuentaDestino;
   DateTime _fecha = DateTime.now();
   bool _guardando = false;
+  bool _cargandoCatalogo = true;
+
+  List<CuentaModel> _cuentas = [];
+  List<CategoriaModel> _categorias = [];
 
   bool get esEdicion => widget.movimiento != null;
 
   @override
   void initState() {
     super.initState();
+    _cargarCatalogo();
     if (esEdicion) {
       final m = widget.movimiento!;
       _tipo = m.tipo;
-      _categoria = m.categoria;
-      _cuenta = m.cuenta;
       _fecha = m.fecha;
       _montoCtrl.text = m.monto.toString();
       _comentarioCtrl.text = m.comentario ?? '';
-      // Si es transferencia, no permitir cambiar modo
-      if (m.categoria == Categoria.transferencia) {
+      if (m.categoriaNombre == 'TRANSFERENCIA') {
         _modo = _ModoFormulario.transferencia;
       }
     }
@@ -56,19 +60,61 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
     super.dispose();
   }
 
+  Future<void> _cargarCatalogo() async {
+    setState(() => _cargandoCatalogo = true);
+    try {
+      final cuentasMaps = await CatalogoService.getCuentas();
+      _cuentas = cuentasMaps.map((map) => CuentaModel.fromMap(map)).where((c) => c.activa).toList();
+
+      final categoriasMaps = await CatalogoService.getCategorias();
+      _categorias = categoriasMaps.map((map) => CategoriaModel.fromMap(map)).where((c) => c.activa).toList();
+
+      // Defaults if not set
+      _cuenta ??= _cuentas.isNotEmpty ? _cuentas.firstWhere((c) => c.nombre == 'BILLETERA', orElse: () => _cuentas.first) : null;
+      _cuentaDestino ??= _cuentas.isNotEmpty ? _cuentas.firstWhere((c) => c.nombre == 'DEBITO BA', orElse: () => _cuentas.first) : null;
+      _categoria ??= _categorias.isNotEmpty ? _categorias.firstWhere((c) => c.nombre == 'INGRESOS', orElse: () => _categorias.first) : null;
+
+      if (esEdicion && _cuentas.isNotEmpty && _categorias.isNotEmpty) {
+        _categoria = _categorias.firstWhere(
+          (c) => c.nombre == widget.movimiento!.categoriaNombre,
+          orElse: () => _categoria!,
+        );
+        _cuenta = _cuentas.firstWhere(
+          (c) => c.nombre == widget.movimiento!.cuentaNombre,
+          orElse: () => _cuenta!,
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error cargando catálogos: $e')));
+    } finally {
+      if (mounted) setState(() => _cargandoCatalogo = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_cargandoCatalogo) {
+      return Scaffold(
+        appBar: AppBar(title: Text(esEdicion ? 'Editar movimiento' : 'Nuevo movimiento')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(esEdicion ? 'Editar movimiento' : 'Nuevo movimiento'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _cargarCatalogo,
+          ),
           _guardando
               ? const Padding(
                   padding: EdgeInsets.all(16),
                   child: SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator()),
+                      child: CircularProgressIndicator(strokeWidth: 2)),
                 )
               : TextButton(onPressed: _guardar, child: const Text('Guardar')),
         ],
@@ -87,26 +133,21 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
                   label: 'Movimiento',
                   icon: Icons.receipt_long,
                   selected: _modo == _ModoFormulario.movimiento,
-                  onTap: () => setState(
-                      () => _modo = _ModoFormulario.movimiento),
+                  onTap: () => setState(() => _modo = _ModoFormulario.movimiento),
                 ),
                 const SizedBox(width: 12),
                 _TipoBtn(
                   label: 'Transferencia',
                   icon: Icons.swap_horiz,
                   selected: _modo == _ModoFormulario.transferencia,
-                  onTap: () => setState(
-                      () => _modo = _ModoFormulario.transferencia),
+                  onTap: () => setState(() => _modo = _ModoFormulario.transferencia),
                 ),
               ]),
               const SizedBox(height: 20),
             ],
 
-            // Campos según modo
-            if (_modo == _ModoFormulario.movimiento)
-              ..._camposMovimiento()
-            else
-              ..._camposTransferencia(),
+            if (_modo == _ModoFormulario.movimiento) ..._camposMovimiento()
+            else ..._camposTransferencia(),
           ],
         ),
       ),
@@ -139,26 +180,24 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const SizedBox(height: 20),
       const _SectionLabel('Categoría'),
       const SizedBox(height: 8),
-      DropdownButtonFormField<Categoria>(
-        initialValue: _categoria,
+      DropdownButtonFormField<CategoriaModel>(
+        value: _categoria,
         decoration: const InputDecoration(border: OutlineInputBorder()),
-        items: Categoria.values
-            .map((c) =>
-                DropdownMenuItem(value: c, child: Text(c.nombre)))
-            .toList(),
-        onChanged: (v) => setState(() => _categoria = v!),
+        items: _categorias.map((c) =>
+            DropdownMenuItem(value: c, child: Text(c.nombre))).toList(),
+        onChanged: (v) => setState(() => _categoria = v),
+        validator: (v) => v == null ? 'Selecciona categoría' : null,
       ),
       const SizedBox(height: 20),
       const _SectionLabel('Cuenta'),
       const SizedBox(height: 8),
-      DropdownButtonFormField<Cuenta>(
-        initialValue: _cuenta,
+      DropdownButtonFormField<CuentaModel>(
+        value: _cuenta,
         decoration: const InputDecoration(border: OutlineInputBorder()),
-        items: Cuenta.values
-            .map((c) =>
-                DropdownMenuItem(value: c, child: Text(c.nombre)))
-            .toList(),
-        onChanged: (v) => setState(() => _cuenta = v!),
+        items: _cuentas.map((c) =>
+            DropdownMenuItem(value: c, child: Text(c.nombre))).toList(),
+        onChanged: (v) => setState(() => _cuenta = v),
+        validator: (v) => v == null ? 'Selecciona cuenta' : null,
       ),
       const SizedBox(height: 20),
       const _SectionLabel('Comentario (opcional)'),
@@ -177,7 +216,6 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
 
   List<Widget> _camposTransferencia() {
     return [
-      // Indicador visual del flujo
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -188,11 +226,11 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _CuentaPill(nombre: _cuenta.nombre, color: Colors.red),
+            _CuentaPill(nombre: _cuenta?.nombre ?? '', color: Colors.red),
             const SizedBox(width: 8),
             Icon(Icons.arrow_forward, color: Colors.blue.shade400),
             const SizedBox(width: 8),
-            _CuentaPill(nombre: _cuentaDestino.nombre, color: Colors.green),
+            _CuentaPill(nombre: _cuentaDestino?.nombre ?? '', color: Colors.green),
           ],
         ),
       ),
@@ -201,37 +239,33 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const SizedBox(height: 20),
       const _SectionLabel('Cuenta origen'),
       const SizedBox(height: 8),
-      DropdownButtonFormField<Cuenta>(
-        initialValue: _cuenta,
+      DropdownButtonFormField<CuentaModel>(
+        value: _cuenta,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
           prefixIcon: Icon(Icons.arrow_upward, color: Colors.red),
         ),
-        items: Cuenta.values
-            .map((c) =>
-                DropdownMenuItem(value: c, child: Text(c.nombre)))
-            .toList(),
+        items: _cuentas.map((c) =>
+            DropdownMenuItem(value: c, child: Text(c.nombre))).toList(),
         onChanged: (v) {
-          if (v == _cuentaDestino) return; // no permitir misma cuenta
-          setState(() => _cuenta = v!);
+          if (v != null && _cuentaDestino?.nombre == v.nombre) return;
+          setState(() => _cuenta = v);
         },
       ),
       const SizedBox(height: 16),
       const _SectionLabel('Cuenta destino'),
       const SizedBox(height: 8),
-      DropdownButtonFormField<Cuenta>(
-        initialValue: _cuentaDestino,
+      DropdownButtonFormField<CuentaModel>(
+        value: _cuentaDestino,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
           prefixIcon: Icon(Icons.arrow_downward, color: Colors.green),
         ),
-        items: Cuenta.values
-            .map((c) =>
-                DropdownMenuItem(value: c, child: Text(c.nombre)))
-            .toList(),
+        items: _cuentas.map((c) =>
+            DropdownMenuItem(value: c, child: Text(c.nombre))).toList(),
         onChanged: (v) {
-          if (v == _cuenta) return; // no permitir misma cuenta
-          setState(() => _cuentaDestino = v!);
+          if (v != null && _cuenta?.nombre == v.nombre) return;
+          setState(() => _cuentaDestino = v);
         },
       ),
       const SizedBox(height: 20),
@@ -255,8 +289,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       const SizedBox(height: 8),
       TextFormField(
         controller: _montoCtrl,
-        keyboardType:
-            const TextInputType.numberWithOptions(decimal: true),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
         decoration: const InputDecoration(
           prefixText: '\$ ',
           hintText: '0.00',
@@ -303,16 +336,24 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
 
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_modo == _ModoFormulario.transferencia && _cuenta == _cuentaDestino) {
+    if (_categoria == null || _cuenta == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('La cuenta origen y destino no pueden ser iguales')),
+        const SnackBar(content: Text('Selecciona categoría y cuenta')),
       );
       return;
+    }
+    if (_modo == _ModoFormulario.transferencia) {
+      if (_cuentaDestino == null || _cuenta!.nombre == _cuentaDestino!.nombre) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('La cuenta origen y destino no pueden ser iguales')),
+        );
+        return;
+      }
     }
 
     setState(() => _guardando = true);
     final monto = double.parse(_montoCtrl.text.replaceAll(',', '.'));
-    final comentario = _comentarioCtrl.text.trim();
+    final comentario = _comentarioCtrl.text.trim().isEmpty ? null : _comentarioCtrl.text.trim();
     final prov = context.read<MovimientosProvider>();
 
     try {
@@ -320,18 +361,18 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
         await prov.agregarTransferencia(
           fecha: _fecha,
           monto: monto,
-          cuentaOrigen: _cuenta,
-          cuentaDestino: _cuentaDestino,
-          comentario: comentario.isEmpty ? null : comentario,
+          cuentaOrigenNombre: _cuenta!.nombre,
+          cuentaDestinoNombre: _cuentaDestino!.nombre,
+          comentario: comentario,
         );
       } else if (esEdicion) {
         await prov.editar(widget.movimiento!.copyWith(
           fecha: _fecha,
           tipo: _tipo,
           monto: monto,
-          categoria: _categoria,
-          cuenta: _cuenta,
-          comentario: comentario.isEmpty ? null : comentario,
+          categoriaNombre: _categoria!.nombre,
+          cuentaNombre: _cuenta!.nombre,
+          comentario: comentario,
           mes: _fecha.month,
           anio: _fecha.year,
         ));
@@ -340,18 +381,16 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
           fecha: _fecha,
           tipo: _tipo,
           monto: monto,
-          categoria: _categoria,
-          cuenta: _cuenta,
-          comentario: comentario.isEmpty ? null : comentario,
+          categoriaNombre: _categoria!.nombre,
+          cuentaNombre: _cuenta!.nombre,
+          comentario: comentario,
         );
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -368,11 +407,11 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade600));
+    return Text(text, style: TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Colors.grey.shade600,
+    ));
   }
 }
 
@@ -400,10 +439,8 @@ class _TipoBtn extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
-            // ignore: deprecated_member_use
             color: selected ? c.withOpacity(0.12) : Colors.transparent,
-            border: Border.all(
-                color: selected ? c : Colors.grey.shade300, width: 1.5),
+            border: Border.all(color: selected ? c : Colors.grey.shade300, width: 1.5),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -411,10 +448,10 @@ class _TipoBtn extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: selected ? c : Colors.grey.shade400),
               const SizedBox(width: 6),
-              Text(label,
-                  style: TextStyle(
-                      color: selected ? c : Colors.grey.shade500,
-                      fontWeight: FontWeight.w600)),
+              Text(label, style: TextStyle(
+                color: selected ? c : Colors.grey.shade500,
+                fontWeight: FontWeight.w600,
+              )),
             ],
           ),
         ),
@@ -433,18 +470,16 @@ class _CuentaPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        // ignore: deprecated_member_use
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(20),
-        // ignore: deprecated_member_use
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Text(nombre,
-          style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              // ignore: deprecated_member_use
-              color: color.withOpacity(0.8))),
+      child: Text(nombre, style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: color.withOpacity(0.8),
+      )),
     );
   }
 }
+

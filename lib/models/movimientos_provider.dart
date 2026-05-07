@@ -1,4 +1,3 @@
-// lib/models/movimientos_provider.dart
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -66,17 +65,16 @@ class MovimientosProvider extends ChangeNotifier {
     required DateTime fecha,
     required TipoMovimiento tipo,
     required double monto,
-    required Categoria categoria,
-    required Cuenta cuenta,
+    required String categoriaNombre,
+    required String cuentaNombre,
     String? comentario,
   }) async {
     final m = Movimiento(
       id: _uuid.v4(), fecha: fecha, tipo: tipo, monto: monto,
-      categoria: categoria, cuenta: cuenta, comentario: comentario,
+      categoriaNombre: categoriaNombre, cuentaNombre: cuentaNombre, 
+      comentario: comentario,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
-    // insertMovimiento ya aplica el delta en móvil
-    // en web DataRepository aplica delta en Supabase
     await _repo.insertMovimiento(m);
     await cargar();
   }
@@ -84,50 +82,46 @@ class MovimientosProvider extends ChangeNotifier {
   Future<void> agregarTransferencia({
     required DateTime fecha,
     required double monto,
-    required Cuenta cuentaOrigen,
-    required Cuenta cuentaDestino,
+    required String cuentaOrigenNombre,
+    required String cuentaDestinoNombre,
     String? comentario,
   }) async {
     final idBase = _uuid.v4();
-    final nota = comentario ??
-        'Transferencia ${cuentaOrigen.nombre} → ${cuentaDestino.nombre}';
+    final nota = comentario ?? 
+        'Transferencia $cuentaOrigenNombre → $cuentaDestinoNombre';
 
-    // EGRESO en cuenta origen
     final egreso = Movimiento(
       id: '${idBase}_out', fecha: fecha,
-      tipo: TipoMovimiento.egreso,   // ← resta en origen
+      tipo: TipoMovimiento.egreso,  
       monto: monto,
-      categoria: Categoria.transferencia,
-      cuenta: cuentaOrigen, comentario: nota,
+      categoriaNombre: 'TRANSFERENCIA',
+      cuentaNombre: cuentaOrigenNombre, 
+      comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
 
-    // INGRESO en cuenta destino
     final ingreso = Movimiento(
       id: '${idBase}_in', fecha: fecha,
-      tipo: TipoMovimiento.ingreso,  // ← suma en destino
+      tipo: TipoMovimiento.ingreso, 
       monto: monto,
-      categoria: Categoria.transferencia,
-      cuenta: cuentaDestino, comentario: nota,
+      categoriaNombre: 'TRANSFERENCIA',
+      cuentaNombre: cuentaDestinoNombre, 
+      comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
 
-    // insertMovimientos aplica delta individualmente a cada uno
     await _repo.insertMovimientos([egreso, ingreso]);
     await cargar();
   }
 
   Future<void> editar(Movimiento nuevo) async {
-    // updateMovimiento revierte el delta anterior y aplica el nuevo
     await _repo.updateMovimiento(nuevo.copyWith(sincronizado: false));
     await cargar();
   }
 
   Future<void> eliminar(String id) async {
-    // deleteMovimiento lee el movimiento antes de borrarlo y revierte delta
     await _repo.deleteMovimiento(id);
 
-    // Si es transferencia, eliminar también el par
     if (id.endsWith('_out') || id.endsWith('_in')) {
       final base = id.replaceAll('_out', '').replaceAll('_in', '');
       final parId = id.endsWith('_out') ? '${base}_in' : '${base}_out';
@@ -139,7 +133,6 @@ class MovimientosProvider extends ChangeNotifier {
   Future<Map<String, double>> getResumenMes() async =>
       _repo.getResumenMes(_mesActual, _anioActual);
 
-  /// Saldos desde tabla local (móvil) o Supabase (web)
   Future<Map<String, double>> getSaldosPorCuenta() async =>
       _repo.getSaldosPorCuenta();
 
@@ -160,3 +153,4 @@ class MovimientosProvider extends ChangeNotifier {
     return lista.length;
   }
 }
+

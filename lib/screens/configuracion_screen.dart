@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../screens/exportar_screen.dart';
 import 'saldos_screen.dart';
+import 'cuentas_screen.dart';
 import '../widgets/sincronizar_widget.dart';
 
 class ConfiguracionScreen extends StatelessWidget {
@@ -25,6 +26,18 @@ class ConfiguracionScreen extends StatelessWidget {
           // ── Datos ─────────────────────────────────────────────────────
           const _SeccionTitulo('Datos'),
           const SizedBox(height: 8),
+          _OpcionTile(
+            icono: Icons.account_balance,
+            color: Colors.orange,
+            titulo: 'Cuentas',
+            subtitulo: 'Administra tus bancos y carteras',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const CuentasScreen()),
+            ),
+          ),
+          const SizedBox(height: 10),
           _OpcionTile(
             icono: Icons.account_balance_wallet_outlined,
             color: Colors.blue,

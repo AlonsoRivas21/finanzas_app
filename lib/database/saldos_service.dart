@@ -4,7 +4,7 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/movimiento.dart';
+import '../database/catalogo_service.dart';
 
 class SaldosService {
   static const _prefix = 'saldo_inicial_';
@@ -19,8 +19,10 @@ class SaldosService {
   static Future<Map<String, double>> getSaldosIniciales() async {
     final prefs = await SharedPreferences.getInstance();
     final saldos = <String, double>{};
-    for (final c in Cuenta.values) {
-      saldos[c.nombre] = prefs.getDouble('$_prefix${c.nombre}') ?? 0.0;
+    final cuentas = await CatalogoService.getCuentas();
+    for (final c in cuentas) {
+      final nombre = c['nombre'] as String;
+      saldos[nombre] = prefs.getDouble('$_prefix$nombre') ?? 0.0;
     }
     return saldos;
   }
