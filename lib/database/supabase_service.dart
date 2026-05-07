@@ -61,9 +61,26 @@ class SupabaseService {
     await PresupuestoService.subirPresupuestos();
 
     // 5. Recalcular saldos_cuentas en Supabase
-    await _recalcularSaldosEnSupabase(uid);
+    await recalcularSaldosEnSupabase(uid);
 
     return pendientes.length;
+  }
+
+  static Future<void> _bajarSaldosAlLocal() async {
+    try {
+      final res = await _client
+          .from('saldos_cuentas')
+          .select('cuenta, saldo_actual')
+          .eq('usuario_id', usuarioActual!.id);
+
+      if ((res as List).isNotEmpty) {
+        final saldos = <String, double>{
+          for (final row in res)
+            row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
+        };
+        await DatabaseHelper().guardarSaldosDesdeNube(saldos);
+      }
+    } catch (_) {}
   }
 
   // ── Bajada ────────────────────────────────────────────────────────────────
@@ -102,45 +119,27 @@ class SupabaseService {
     // 3. Presupuestos
     await PresupuestoService.bajarPresupuestos();
 
-    // 4. Saldos actuales desde Supabase → local
+    // 4. Descargar los saldos calculados en la nube (que tienen el historial 100% completo)
     await _bajarSaldosAlLocal();
 
     return movimientos.length;
   }
 
-  static Future<void> _bajarSaldosAlLocal() async {
+  static Future<void> recalcularSaldosEnSupabase(String uid) async {
     try {
-      final res = await _client
-          .from('saldos_cuentas')
-          .select('cuenta, saldo_actual')
-          .eq('usuario_id', usuarioActual!.id);
+      // 1. Obtener saldos iniciales desde la tabla 'cuentas'
+      final cuentasRes = await _client
+          .from('cuentas')
+          .select('nombre, saldo_inicial')
+          .eq('usuario_id', uid)
+          .eq('activa', true);
 
-      if ((res as List).isNotEmpty) {
-        final saldos = <String, double>{
-          for (final row in res)
-            row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
-        };
-        await DatabaseHelper().guardarSaldosDesdeNube(saldos);
-      }
-    } catch (_) {}
-  }
+      final saldos = <String, double>{
+        for (final row in cuentasRes as List)
+          row['nombre'] as String: (row['saldo_inicial'] as num?)?.toDouble() ?? 0.0
+      };
 
-  static Future<void> _recalcularSaldosEnSupabase(String uid) async {
-    try {
-      // Leer saldos_cuentas actuales (que incluyen el saldo inicial)
-      final saldosRes = await _client
-          .from('saldos_cuentas')
-          .select()
-          .eq('usuario_id', uid);
-
-      // Si no hay saldos base, partir de cero
-      final saldos = <String, double>{};
-      for (final row in saldosRes as List) {
-        // Resetear a 0 para recalcular desde historial
-        saldos[row['cuenta'] as String] = 0;
-      }
-
-      // Sumar todos los movimientos
+      // 2. Sumar movimientos desde la nube
       final movRes = await _client
           .from('movimientos')
           .select('cuenta, tipo, monto')
@@ -148,10 +147,14 @@ class SupabaseService {
 
       for (final row in movRes as List) {
         final cuenta = row['cuenta'] as String;
+        if (!saldos.containsKey(cuenta)) continue;
         final monto  = (row['monto'] as num).toDouble();
         final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
         saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
       }
+
+      // 3. Limpiar saldos actuales del usuario
+      await _client.from('saldos_cuentas').delete().eq('usuario_id', uid);
 
       if (saldos.isEmpty) return;
 
@@ -163,7 +166,7 @@ class SupabaseService {
       }).toList();
 
       await _client.from('saldos_cuentas')
-          .upsert(rows, onConflict: 'usuario_id,cuenta');
+          .insert(rows);
     } catch (_) {}
   }
 

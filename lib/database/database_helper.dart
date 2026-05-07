@@ -182,6 +182,56 @@ class DatabaseHelper {
     };
   }
 
+  /// Recalcula los saldos de todas las cuentas desde cero: Saldo Inicial + Movimientos
+  Future<void> recalibrarSaldosLocales() async {
+    final database = await db;
+    
+    // 1. Obtener saldos iniciales de cuentas activas
+    final cuentas = await getCuentas();
+    final saldos = <String, double>{
+      for (var c in cuentas) 
+        c['nombre'] as String: (c['saldo_inicial'] as num).toDouble()
+    };
+
+    // 2. Sumar el neto de movimientos agrupados por cuenta y tipo
+    final rows = await database.rawQuery('''
+      SELECT cuenta, tipo, SUM(monto) as total
+      FROM movimientos
+      GROUP BY cuenta, tipo
+    ''');
+
+    for (final row in rows) {
+      final cuenta = row['cuenta'] as String;
+      if (saldos.containsKey(cuenta)) {
+        final monto = (row['total'] as num).toDouble();
+        final delta = row['tipo'] == 'ingreso' ? monto : -monto;
+        saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+      }
+    }
+
+    // 3. Actualizar la tabla de saldos actuales (Limpiar e Insertar)
+    final batch = database.batch();
+    batch.delete('saldos_cuentas');
+    for (final entry in saldos.entries) {
+      batch.insert('saldos_cuentas', {
+        'cuenta': entry.key,
+        'saldo_actual': entry.value,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> updateSaldoInicial(String nombreCuenta, double saldo) async {
+    final database = await db;
+    await database.update(
+      'cuentas',
+      {'saldo_inicial': saldo, 'sincronizado': 0},
+      where: 'nombre = ?',
+      whereArgs: [nombreCuenta],
+    );
+  }
+
   Future<void> setSaldoCuenta(String cuenta, double saldo) async {
     final database = await db;
     await database.insert('saldos_cuentas', {

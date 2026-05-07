@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../database/catalogo_service.dart';
 import '../models/movimientos_provider.dart';
 
 class ResumenBar extends StatelessWidget {
@@ -14,21 +15,40 @@ class ResumenBar extends StatelessWidget {
     final prov = context.read<MovimientosProvider>();
     final fmt = NumberFormat('#,##0.00', 'es');
 
-    return FutureBuilder<Map<String, double>>(
-      future: prov.getSaldosPorCuenta(),
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        prov.getSaldosPorCuenta(),
+        CatalogoService.getCuentas(),
+      ]),
       builder: (context, snap) {
         if (!snap.hasData) return const SizedBox(height: 8);
 
-        final saldos = snap.data!;
+        final saldos = snap.data![0] as Map<String, double>;
+        final cuentas = snap.data![1] as List<Map<String, dynamic>>;
 
-        final efectivo  = saldos['BILLETERA'] ?? 0;
-        final bancos    = (saldos['DEBITO BA'] ?? 0) +
-                          (saldos['DEBITO NIU'] ?? 0);
-        final ahorro    = saldos['MULTIMONEY'] ?? 0;
-        final deudaBa   = saldos['CREDITO BA'] ?? 0;
-        final deudaNiu  = saldos['CREDITO NIU'] ?? 0;
-        final deudaTotal = (deudaBa + deudaNiu).abs();
-        final hayDeuda  = deudaBa < 0 || deudaNiu < 0;
+        double efectivo = 0;
+        double bancos = 0;
+        double ahorro = 0;
+        double creditoTotal = 0;
+
+        for (var cuenta in cuentas) {
+          final nombre = cuenta['nombre'] as String;
+          final tipo = cuenta['tipo'] as String;
+          final saldo = saldos[nombre] ?? 0.0;
+
+          if (tipo == 'efectivo') {
+            efectivo += saldo;
+          } else if (tipo == 'debito') {
+            bancos += saldo;
+          } else if (tipo == 'ahorro') {
+            ahorro += saldo;
+          } else if (tipo == 'credito') {
+            creditoTotal += saldo;
+          }
+        }
+
+        final hayDeuda = creditoTotal < 0;
+        final deudaTotal = creditoTotal.abs();
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

@@ -143,11 +143,13 @@ class CatalogoService {
           })
           .eq('id', cuenta['id']);
     } else {
-      await DatabaseHelper().updateCuenta({
+      final db = DatabaseHelper();
+      await db.updateCuenta({
         ...cuenta,
         'activa': _toInt(cuenta['activa']),
         'sincronizado': 0
       });
+      await db.recalibrarSaldosLocales();
     }
   }
 
