@@ -1,4 +1,3 @@
-// lib/models/movimientos_provider.dart
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import '../database/database_helper.dart';
 
 class MovimientosProvider extends ChangeNotifier {
   final _repo = DataRepository();
+  final _db   = DatabaseHelper();
   final _uuid = const Uuid();
 
   List<Movimiento> _movimientos = [];
@@ -65,13 +65,14 @@ class MovimientosProvider extends ChangeNotifier {
     required DateTime fecha,
     required TipoMovimiento tipo,
     required double monto,
-    required Categoria categoria,
-    required Cuenta cuenta,
+    required String categoriaNombre,
+    required String cuentaNombre,
     String? comentario,
   }) async {
     final m = Movimiento(
       id: _uuid.v4(), fecha: fecha, tipo: tipo, monto: monto,
-      categoria: categoria, cuenta: cuenta, comentario: comentario,
+      categoriaNombre: categoriaNombre, cuentaNombre: cuentaNombre, 
+      comentario: comentario,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
     await _repo.insertMovimiento(m);
@@ -81,25 +82,34 @@ class MovimientosProvider extends ChangeNotifier {
   Future<void> agregarTransferencia({
     required DateTime fecha,
     required double monto,
-    required Cuenta cuentaOrigen,
-    required Cuenta cuentaDestino,
+    required String cuentaOrigenNombre,
+    required String cuentaDestinoNombre,
     String? comentario,
   }) async {
     final idBase = _uuid.v4();
-    final nota = comentario ??
-        'Transferencia ${cuentaOrigen.nombre} → ${cuentaDestino.nombre}';
+    final nota = comentario ?? 
+        'Transferencia $cuentaOrigenNombre → $cuentaDestinoNombre';
+
     final egreso = Movimiento(
-      id: '${idBase}_out', fecha: fecha, tipo: TipoMovimiento.egreso,
-      monto: monto, categoria: Categoria.transferencia,
-      cuenta: cuentaOrigen, comentario: nota,
+      id: '${idBase}_out', fecha: fecha,
+      tipo: TipoMovimiento.egreso,  
+      monto: monto,
+      categoriaNombre: 'TRANSFERENCIA',
+      cuentaNombre: cuentaOrigenNombre, 
+      comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
+
     final ingreso = Movimiento(
-      id: '${idBase}_in', fecha: fecha, tipo: TipoMovimiento.ingreso,
-      monto: monto, categoria: Categoria.transferencia,
-      cuenta: cuentaDestino, comentario: nota,
+      id: '${idBase}_in', fecha: fecha,
+      tipo: TipoMovimiento.ingreso, 
+      monto: monto,
+      categoriaNombre: 'TRANSFERENCIA',
+      cuentaNombre: cuentaDestinoNombre, 
+      comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
+
     await _repo.insertMovimientos([egreso, ingreso]);
     await cargar();
   }
@@ -111,14 +121,18 @@ class MovimientosProvider extends ChangeNotifier {
 
   Future<void> eliminar(String id) async {
     await _repo.deleteMovimiento(id);
+
+    if (id.endsWith('_out') || id.endsWith('_in')) {
+      final base = id.replaceAll('_out', '').replaceAll('_in', '');
+      final parId = id.endsWith('_out') ? '${base}_in' : '${base}_out';
+      await _repo.deleteMovimiento(parId);
+    }
     await cargar();
   }
 
-  /// Resumen del mes — SQLite en móvil, Supabase en web
   Future<Map<String, double>> getResumenMes() async =>
       _repo.getResumenMes(_mesActual, _anioActual);
 
-  /// Saldos actuales — SQLite en móvil, Supabase en web
   Future<Map<String, double>> getSaldosPorCuenta() async =>
       _repo.getSaldosPorCuenta();
 
@@ -130,7 +144,7 @@ class MovimientosProvider extends ChangeNotifier {
 
   Future<int> getTotalRegistros() async {
     if (kIsWeb) return 0;
-    return DatabaseHelper().countMovimientos();
+    return _db.countMovimientos();
   }
 
   Future<int> importarLista(List<Movimiento> lista) async {
@@ -139,3 +153,4 @@ class MovimientosProvider extends ChangeNotifier {
     return lista.length;
   }
 }
+

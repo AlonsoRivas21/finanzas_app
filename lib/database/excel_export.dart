@@ -86,8 +86,8 @@ class ExcelExportService {
       _cell(registro, row, 1,
           m.tipo == TipoMovimiento.ingreso ? 'INGRESO' : 'EGRESO');
       _cell(registro, row, 2, m.monto);
-      _cell(registro, row, 3, m.categoria.nombre);
-      _cell(registro, row, 4, m.cuenta.nombre);
+      _cell(registro, row, 3, m.categoriaNombre);
+      _cell(registro, row, 4, m.cuentaNombre);
       _cell(registro, row, 5, m.comentario ?? '');
       _cell(registro, row, 6, m.mes);
     }
@@ -108,11 +108,11 @@ class ExcelExportService {
     _headerCell(bd, 0, 4, 'SALDO REAL');
 
     int row = 1;
-    for (final cuenta in Cuenta.values) {
-      final saldoInicial = saldos[cuenta.nombre] ?? 0.0;
-      final ingresos = resumenCuentas[cuenta.nombre]?['ingresos'] ?? 0.0;
-      final egresos  = resumenCuentas[cuenta.nombre]?['egresos']  ?? 0.0;
-      _cell(bd, row, 0, cuenta.nombre);
+for (final cuentaNombre in ['BILLETERA', 'DEBITO BA', 'DEBITO NIU', 'CREDITO BA', 'CREDITO NIU', 'MULTIMONEY']) {
+      final saldoInicial = saldos[cuentaNombre] ?? 0.0;
+      final ingresos = resumenCuentas[cuentaNombre]?['ingresos'] ?? 0.0;
+      final egresos  = resumenCuentas[cuentaNombre]?['egresos']  ?? 0.0;
+      _cell(bd, row, 0, cuentaNombre);
       _cell(bd, row, 1, saldoInicial);
       _cell(bd, row, 2, ingresos);
       _cell(bd, row, 3, egresos);

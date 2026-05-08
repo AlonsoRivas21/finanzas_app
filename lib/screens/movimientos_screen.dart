@@ -1,5 +1,6 @@
 // lib/screens/movimientos_screen.dart
 
+import 'package:finanzas_app/database/catalogo_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -20,13 +21,28 @@ class MovimientosScreen extends StatefulWidget {
 class _MovimientosScreenState extends State<MovimientosScreen> {
   final _searchCtrl = TextEditingController();
   bool _mostrarBusqueda = false;
+  List<Map<String, dynamic>> _cuentas = []; 
 
   @override
   void initState() {
     super.initState();
+    _cargarCuentas();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<MovimientosProvider>().cargar();
     });
+  }
+
+  Future<void> _cargarCuentas() async {
+    try {
+      final cuentas = await CatalogoService.getCuentas();
+      if (mounted) {
+        setState(() {
+          _cuentas = cuentas;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error al cargar cuentas: $e');
+    }
   }
 
   @override
@@ -37,7 +53,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
 
   void _abrirImportar() {
     Navigator.push(context,
-        MaterialPageRoute(builder: (_) => ImportarExcelScreen()));
+        MaterialPageRoute(builder: (_) => const ImportarExcelScreen()));
   }
 
   @override
@@ -131,7 +147,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
       body: Column(
         children: [
           ResumenBar(mes: prov.mesActual),
-          _FiltrosRapidos(prov: prov),
+          _FiltrosRapidos(prov: prov, cuentas: _cuentas),
           Expanded(
             child: prov.cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -145,7 +161,7 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => FormMovimientoScreen())),
+            MaterialPageRoute(builder: (_) => const FormMovimientoScreen())),
         icon: const Icon(Icons.add),
         label: const Text('Nuevo'),
       ),
@@ -155,7 +171,8 @@ class _MovimientosScreenState extends State<MovimientosScreen> {
 
 class _FiltrosRapidos extends StatelessWidget {
   final MovimientosProvider prov;
-  const _FiltrosRapidos({required this.prov});
+  final List<Map<String, dynamic>> cuentas;
+  const _FiltrosRapidos({required this.prov, required this.cuentas});
 
   @override
   Widget build(BuildContext context) {
@@ -178,13 +195,13 @@ class _FiltrosRapidos extends StatelessWidget {
               onTap: () => prov.setFiltroTipo(
                   prov.filtroTipo == 'egreso' ? null : 'egreso')),
           const SizedBox(width: 8),
-          ...Cuenta.values.map((c) => Padding(
+          ...cuentas.map((c) => Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _Chip(
-              label: c.nombre,
-              selected: prov.filtroCuenta == c.nombre,
+              label: c['nombre'] as String,
+              selected: prov.filtroCuenta == c['nombre'],
               onTap: () => prov.setFiltroCuenta(
-                  prov.filtroCuenta == c.nombre ? null : c.nombre),
+                  prov.filtroCuenta == c['nombre'] ? null : c['nombre'] as String),
             ),
           )),
         ],
@@ -210,6 +227,7 @@ class _Chip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
+          // ignore: deprecated_member_use
           color: selected ? c.withOpacity(0.15) : Colors.transparent,
           border: Border.all(color: selected ? c : Colors.grey.shade300),
           borderRadius: BorderRadius.circular(20),
@@ -282,7 +300,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => FormMovimientoScreen())),
+                MaterialPageRoute(builder: (_) => const FormMovimientoScreen())),
             icon: const Icon(Icons.add),
             label: const Text('Agregar primero'),
           ),

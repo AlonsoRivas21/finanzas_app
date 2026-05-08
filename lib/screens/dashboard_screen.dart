@@ -4,8 +4,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../database/catalogo_service.dart';
-import '../database/data_repository.dart';
 import '../models/movimiento.dart';
 import '../models/movimientos_provider.dart';
 
@@ -74,17 +72,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               subtitulo: meses[prov.mesActual - 1],
             ),
             const SizedBox(height: 10),
-            _ResumenMes(),
+            const _ResumenMes(),
             const SizedBox(height: 20),
 
             // 1. Saldos por cuenta (primero)
-            _TituloSeccion(
+            const _TituloSeccion(
               icono: Icons.account_balance_wallet,
               titulo: 'Saldos por cuenta',
               subtitulo: 'Acumulado total',
             ),
             const SizedBox(height: 10),
-            _GraficoSaldosCuentas(),
+            const _GraficoSaldosCuentas(),
             const SizedBox(height: 20),
             
             // 3. Gráfico pastel
@@ -98,7 +96,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 20),
 
             // 4. Barras por semana
-            _TituloSeccion(
+            const _TituloSeccion(
               icono: Icons.bar_chart,
               titulo: 'Ingresos vs egresos',
               subtitulo: 'Por semana',
@@ -108,13 +106,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 20),
 
             // 5. Últimos movimientos
-            _TituloSeccion(
+            const _TituloSeccion(
               icono: Icons.history,
               titulo: 'Últimos movimientos',
               subtitulo: '',
             ),
             const SizedBox(height: 10),
-            _UltimosMovimientos(),
+            const _UltimosMovimientos(),
             const SizedBox(height: 20),
           ],
         ),
@@ -158,8 +156,10 @@ class _GraficoSaldosCuentas extends StatelessWidget {
     return FutureBuilder<Map<String, double>>(
       future: context.read<MovimientosProvider>().getSaldosPorCuenta(),
       builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox(height: 100,
+        if (!snap.hasData) {
+          return const SizedBox(height: 100,
             child: Center(child: CircularProgressIndicator()));
+        }
         final saldos = snap.data!;
 
         final maxAbs = saldos.values.fold<double>(
@@ -294,8 +294,10 @@ class _StatCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          // ignore: deprecated_member_use
           color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(12),
+          // ignore: deprecated_member_use
           border: Border.all(color: color.withOpacity(0.2)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -340,14 +342,17 @@ class _GraficoPastelState extends State<_GraficoPastel> {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: context.read<MovimientosProvider>().getGastosPorCategoria(),
       builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox(height: 200,
+        if (!snap.hasData) {
+          return const SizedBox(height: 200,
             child: Center(child: CircularProgressIndicator()));
+        }
 
         final datos = snap.data!
             .where((d) => !_excluir.contains((d['categoria'] as String).toUpperCase()))
             .toList();
 
-        if (datos.isEmpty) return Container(
+        if (datos.isEmpty) {
+          return Container(
           height: 100,
           decoration: BoxDecoration(
             border: Border.all(color: Colors.grey.shade200),
@@ -356,6 +361,7 @@ class _GraficoPastelState extends State<_GraficoPastel> {
           child: Center(child: Text('Sin gastos este mes',
               style: TextStyle(color: Colors.grey.shade400))),
         );
+        }
 
         final total = datos.fold<double>(0, (s, d) => s + (d['total'] as double));
 
@@ -432,11 +438,14 @@ class _GraficoBarrasSemanas extends StatelessWidget {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: context.read<MovimientosProvider>().getResumenPorSemana(),
       builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox(height: 180,
+        if (!snap.hasData) {
+          return const SizedBox(height: 180,
             child: Center(child: CircularProgressIndicator()));
+        }
 
         final datos = snap.data!;
-        if (datos.isEmpty) return Container(
+        if (datos.isEmpty) {
+          return Container(
           height: 100,
           decoration: BoxDecoration(
             border: Border.all(color: Colors.grey.shade200),
@@ -445,6 +454,7 @@ class _GraficoBarrasSemanas extends StatelessWidget {
           child: Center(child: Text('Sin datos este mes',
               style: TextStyle(color: Colors.grey.shade400))),
         );
+        }
 
         final maxVal = datos.fold<double>(0, (m, d) {
           final ing = (d['ingresos'] as double?) ?? 0;
@@ -549,9 +559,9 @@ class _UltimosMovimientos extends StatelessWidget {
           final color = esIngreso ? Colors.green : Colors.red;
           return ListTile(
             dense: true,
-            title: Text(m.categoria.nombre,
+            title: Text(m.categoria,
                 style: const TextStyle(fontSize: 13)),
-            subtitle: Text(m.cuenta.nombre,
+            subtitle: Text(m.cuenta,
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
             trailing: Text(
               '${esIngreso ? '+' : '-'}\$${fmt.format(m.monto)}',

@@ -3,8 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/catalogo_service.dart';
-import '../models/cuenta_model.dart';
-import '../models/categoria_model.dart';
 
 class GestionScreen extends StatefulWidget {
   const GestionScreen({super.key});
@@ -21,8 +19,6 @@ class _GestionScreenState extends State<GestionScreen>
   void initState() {
     super.initState();
     _tab = TabController(length: 2, vsync: this);
-    // Limpiar caché al entrar para mostrar datos frescos
-    CatalogoService.limpiarCache();
   }
 
   @override
@@ -59,13 +55,12 @@ class _GestionScreenState extends State<GestionScreen>
 
 class _CuentasTab extends StatefulWidget {
   const _CuentasTab();
-
   @override
   State<_CuentasTab> createState() => _CuentasTabState();
 }
 
 class _CuentasTabState extends State<_CuentasTab> {
-  List<CuentaModel> _cuentas = [];
+  List<Map<String, dynamic>> _cuentas = [];
   bool _cargando = true;
 
   @override
@@ -76,43 +71,34 @@ class _CuentasTabState extends State<_CuentasTab> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    // Siempre forceRefresh para evitar caché desactualizada
-    final cuentas = await CatalogoService.getCuentas(forceRefresh: true);
+    final cuentas = await CatalogoService.getCuentas();
     setState(() { _cuentas = cuentas; _cargando = false; });
   }
 
-  Future<void> _mostrarForm({CuentaModel? cuenta}) async {
+  Future<void> _mostrarForm({Map<String, dynamic>? cuenta}) async {
     final res = await showDialog<bool>(
       context: context,
       builder: (_) => _FormCuentaDialog(cuenta: cuenta),
     );
-    if (res == true) {
-      CatalogoService.limpiarCache();
-      _cargar();
-    }
+    if (res == true) _cargar();
   }
 
-  Future<void> _eliminar(CuentaModel cuenta) async {
+  Future<void> _eliminar(Map<String, dynamic> cuenta) async {
     final confirmado = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar cuenta'),
-        content: Text(
-            '¿Eliminar "${cuenta.nombre}"? Los movimientos existentes se conservan.'),
+        content: Text('¿Eliminar "${cuenta['nombre']}"? Los movimientos existentes se conservan.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
+          TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Eliminar',
-                  style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
     if (confirmado == true) {
-      await CatalogoService.eliminarCuenta(cuenta.id);
-      CatalogoService.limpiarCache();
+      await CatalogoService.eliminarCuenta(cuenta['id'] as String);
       _cargar();
     }
   }
@@ -131,8 +117,7 @@ class _CuentasTabState extends State<_CuentasTab> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_cuentas.length} cuentas activas',
-                        style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 13)),
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
                     FilledButton.icon(
                       onPressed: () => _mostrarForm(),
                       icon: const Icon(Icons.add, size: 18),
@@ -147,17 +132,14 @@ class _CuentasTabState extends State<_CuentasTab> {
                   itemCount: _cuentas.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
-                    final c = _cuentas[i];
-                    final color = c.esTarjeta
-                        ? Colors.red
-                        : c.esAhorro
-                            ? Colors.teal
-                            : Colors.blue;
-                    final icono = c.esTarjeta
-                        ? Icons.credit_card
-                        : c.esAhorro
-                            ? Icons.savings
-                            : Icons.account_balance;
+                    final c    = _cuentas[i];
+                    final tipo = c['tipo'] as String;
+                    final esTarjeta = tipo == 'credito';
+                    final esAhorro  = tipo == 'ahorro';
+                    final color = esTarjeta ? Colors.red
+                        : esAhorro ? Colors.teal : Colors.blue;
+                    final icono = esTarjeta ? Icons.credit_card
+                        : esAhorro ? Icons.savings : Icons.account_balance;
 
                     return Container(
                       decoration: BoxDecoration(
@@ -166,23 +148,21 @@ class _CuentasTabState extends State<_CuentasTab> {
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
+                          // ignore: deprecated_member_use
                           backgroundColor: color.withOpacity(0.1),
                           child: Icon(icono, color: color, size: 20),
                         ),
-                        title: Text(c.nombre,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w500)),
+                        title: Text(c['nombre'] as String,
+                            style: const TextStyle(fontWeight: FontWeight.w500)),
                         subtitle: Text(
-                          '${_tipoLabel(c.tipo)} · Saldo inicial: \$${fmt.format(c.saldoInicial)}',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500),
+                          '${_tipoLabel(tipo)} · Saldo inicial: \$${fmt.format((c['saldo_inicial'] as num?)?.toDouble() ?? 0)}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon:
-                                  const Icon(Icons.edit_outlined, size: 18),
+                              icon: const Icon(Icons.edit_outlined, size: 18),
                               onPressed: () => _mostrarForm(cuenta: c),
                             ),
                             IconButton(
@@ -215,17 +195,16 @@ class _CuentasTabState extends State<_CuentasTab> {
 // ── Formulario Cuenta ─────────────────────────────────────────────────────────
 
 class _FormCuentaDialog extends StatefulWidget {
-  final CuentaModel? cuenta;
+  final Map<String, dynamic>? cuenta;
   const _FormCuentaDialog({this.cuenta});
-
   @override
   State<_FormCuentaDialog> createState() => _FormCuentaDialogState();
 }
 
 class _FormCuentaDialogState extends State<_FormCuentaDialog> {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey  = GlobalKey<FormState>();
   final _nombreCtrl = TextEditingController();
-  final _saldoCtrl = TextEditingController();
+  final _saldoCtrl  = TextEditingController();
   String _tipo = 'debito';
   bool _guardando = false;
 
@@ -235,11 +214,10 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
   void initState() {
     super.initState();
     if (esEdicion) {
-      _nombreCtrl.text = widget.cuenta!.nombre;
-      _saldoCtrl.text = widget.cuenta!.saldoInicial == 0
-          ? ''
-          : widget.cuenta!.saldoInicial.toString();
-      _tipo = widget.cuenta!.tipo;
+      _nombreCtrl.text = widget.cuenta!['nombre'] as String;
+      final saldo = (widget.cuenta!['saldo_inicial'] as num?)?.toDouble() ?? 0.0;
+      _saldoCtrl.text = saldo == 0 ? '' : saldo.toString();
+      _tipo = widget.cuenta!['tipo'] as String? ?? 'debito';
     }
   }
 
@@ -255,27 +233,25 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
     setState(() => _guardando = true);
 
     final nombre = _nombreCtrl.text.trim().toUpperCase();
-    final saldo =
-        double.tryParse(_saldoCtrl.text.replaceAll(',', '.')) ?? 0.0;
+    final saldo  = double.tryParse(_saldoCtrl.text.replaceAll(',', '.')) ?? 0.0;
 
     try {
       if (esEdicion) {
-        await CatalogoService.actualizarCuenta(
-          widget.cuenta!.copyWith(
-              nombre: nombre, tipo: _tipo, saldoInicial: saldo),
-        );
+        await CatalogoService.actualizarCuenta({
+          ...widget.cuenta!,
+          'nombre':        nombre,
+          'tipo':          _tipo,
+          'saldo_inicial': saldo,
+        });
       } else {
         await CatalogoService.crearCuenta(
             nombre: nombre, tipo: _tipo, saldoInicial: saldo);
       }
-      CatalogoService.limpiarCache();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -294,12 +270,11 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
             decoration: const InputDecoration(
                 labelText: 'Nombre', border: OutlineInputBorder()),
             textCapitalization: TextCapitalization.characters,
-            validator: (v) =>
-                v == null || v.isEmpty ? 'Requerido' : null,
+            validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _tipo,
+            initialValue: _tipo,
             decoration: const InputDecoration(
                 labelText: 'Tipo', border: OutlineInputBorder()),
             items: const [
@@ -325,16 +300,13 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
         ]),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context, false),
+        TextButton(onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar')),
         FilledButton(
           onPressed: _guardando ? null : _guardar,
           child: _guardando
-              ? const SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : Text(esEdicion ? 'Guardar' : 'Crear'),
         ),
       ],
@@ -346,13 +318,12 @@ class _FormCuentaDialogState extends State<_FormCuentaDialog> {
 
 class _CategoriasTab extends StatefulWidget {
   const _CategoriasTab();
-
   @override
   State<_CategoriasTab> createState() => _CategoriasTabState();
 }
 
 class _CategoriasTabState extends State<_CategoriasTab> {
-  List<CategoriaModel> _categorias = [];
+  List<Map<String, dynamic>> _categorias = [];
   bool _cargando = true;
 
   @override
@@ -363,41 +334,34 @@ class _CategoriasTabState extends State<_CategoriasTab> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final cats = await CatalogoService.getCategorias(forceRefresh: true);
+    final cats = await CatalogoService.getCategorias();
     setState(() { _categorias = cats; _cargando = false; });
   }
 
-  Future<void> _mostrarForm({CategoriaModel? cat}) async {
+  Future<void> _mostrarForm({Map<String, dynamic>? cat}) async {
     final res = await showDialog<bool>(
       context: context,
       builder: (_) => _FormCategoriaDialog(categoria: cat),
     );
-    if (res == true) {
-      CatalogoService.limpiarCache();
-      _cargar();
-    }
+    if (res == true) _cargar();
   }
 
-  Future<void> _eliminar(CategoriaModel cat) async {
+  Future<void> _eliminar(Map<String, dynamic> cat) async {
     final confirmado = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar categoría'),
-        content: Text('¿Eliminar "${cat.nombre}"?'),
+        content: Text('¿Eliminar "${cat['nombre']}"?'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
+          TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Eliminar',
-                  style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
     if (confirmado == true) {
-      await CatalogoService.eliminarCategoria(cat.id);
-      CatalogoService.limpiarCache();
+      await CatalogoService.eliminarCategoria(cat['id'] as String);
       _cargar();
     }
   }
@@ -414,8 +378,7 @@ class _CategoriasTabState extends State<_CategoriasTab> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_categorias.length} categorías activas',
-                        style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 13)),
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
                     FilledButton.icon(
                       onPressed: () => _mostrarForm(),
                       icon: const Icon(Icons.add, size: 18),
@@ -430,12 +393,10 @@ class _CategoriasTabState extends State<_CategoriasTab> {
                   itemCount: _categorias.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
-                    final cat = _categorias[i];
-                    final color = cat.tipo == 'ingreso'
-                        ? Colors.green
-                        : cat.tipo == 'ambos'
-                            ? Colors.blue
-                            : Colors.orange;
+                    final cat  = _categorias[i];
+                    final tipo = cat['tipo'] as String;
+                    final color = tipo == 'ingreso' ? Colors.green
+                        : tipo == 'ambos' ? Colors.blue : Colors.orange;
 
                     return Container(
                       decoration: BoxDecoration(
@@ -444,16 +405,15 @@ class _CategoriasTabState extends State<_CategoriasTab> {
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
+                          // ignore: deprecated_member_use
                           backgroundColor: color.withOpacity(0.1),
-                          child: Icon(_iconoDesdeString(cat.icono),
+                          child: Icon(_iconoDesdeString(cat['icono'] as String? ?? 'label'),
                               color: color, size: 18),
                         ),
-                        title: Text(cat.nombre,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w500)),
-                        subtitle: Text(_tipoLabel(cat.tipo),
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey.shade500)),
+                        title: Text(cat['nombre'] as String,
+                            style: const TextStyle(fontWeight: FontWeight.w500)),
+                        subtitle: Text(_tipoLabel(tipo),
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -516,17 +476,16 @@ class _CategoriasTabState extends State<_CategoriasTab> {
 // ── Formulario Categoría ──────────────────────────────────────────────────────
 
 class _FormCategoriaDialog extends StatefulWidget {
-  final CategoriaModel? categoria;
+  final Map<String, dynamic>? categoria;
   const _FormCategoriaDialog({this.categoria});
-
   @override
   State<_FormCategoriaDialog> createState() => _FormCategoriaDialogState();
 }
 
 class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey    = GlobalKey<FormState>();
   final _nombreCtrl = TextEditingController();
-  String _tipo = 'egreso';
+  String _tipo  = 'egreso';
   String _icono = 'label';
   bool _guardando = false;
 
@@ -559,9 +518,9 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
   void initState() {
     super.initState();
     if (esEdicion) {
-      _nombreCtrl.text = widget.categoria!.nombre;
-      _tipo  = widget.categoria!.tipo;
-      _icono = widget.categoria!.icono;
+      _nombreCtrl.text = widget.categoria!['nombre'] as String;
+      _tipo  = widget.categoria!['tipo'] as String? ?? 'egreso';
+      _icono = widget.categoria!['icono'] as String? ?? 'label';
     }
   }
 
@@ -577,28 +536,24 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
 
     try {
       if (esEdicion) {
-        await CatalogoService.actualizarCategoria(
-          widget.categoria!.copyWith(
-            nombre: _nombreCtrl.text.trim().toUpperCase(),
-            tipo: _tipo,
-            icono: _icono,
-          ),
-        );
+        await CatalogoService.actualizarCategoria({
+          ...widget.categoria!,
+          'nombre': _nombreCtrl.text.trim().toUpperCase(),
+          'tipo':   _tipo,
+          'icono':  _icono,
+        });
       } else {
         await CatalogoService.crearCategoria(
           nombre: _nombreCtrl.text.trim(),
-          tipo: _tipo,
-          icono: _icono,
+          tipo:   _tipo,
+          icono:  _icono,
         );
       }
-      CatalogoService.limpiarCache();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -617,12 +572,11 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
             decoration: const InputDecoration(
                 labelText: 'Nombre', border: OutlineInputBorder()),
             textCapitalization: TextCapitalization.characters,
-            validator: (v) =>
-                v == null || v.isEmpty ? 'Requerido' : null,
+            validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _tipo,
+            initialValue: _tipo,
             decoration: const InputDecoration(
                 labelText: 'Aplica a', border: OutlineInputBorder()),
             items: const [
@@ -640,8 +594,7 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
           ),
           const SizedBox(height: 6),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 8, runSpacing: 8,
             children: _iconos.entries.map((e) {
               final selected = e.key == _icono;
               return GestureDetector(
@@ -668,16 +621,13 @@ class _FormCategoriaDialogState extends State<_FormCategoriaDialog> {
         ]),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context, false),
+        TextButton(onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar')),
         FilledButton(
           onPressed: _guardando ? null : _guardar,
           child: _guardando
-              ? const SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : Text(esEdicion ? 'Guardar' : 'Crear'),
         ),
       ],

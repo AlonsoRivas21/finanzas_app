@@ -28,7 +28,6 @@ class DataRepository {
         limit: limit, offset: offset,
       );
     }
-
     var query = _client.from('movimientos').select().eq('usuario_id', _uid);
     if (mes != null)    query = query.eq('mes', mes);
     if (anio != null)   query = query.eq('anio', anio);
@@ -41,8 +40,10 @@ class DataRepository {
     if (busqueda != null && busqueda.isNotEmpty) {
       final q = busqueda.toLowerCase();
       lista = lista.where((m) =>
-        m.categoria.nombre.toLowerCase().contains(q) ||
-        m.cuenta.nombre.toLowerCase().contains(q) ||
+
+        m.categoriaNombre.toLowerCase().contains(q) ||
+        m.cuentaNombre.toLowerCase().contains(q) ||
+
         (m.comentario?.toLowerCase().contains(q) ?? false)
       ).toList();
     }
@@ -50,29 +51,115 @@ class DataRepository {
   }
 
   Future<void> insertMovimiento(Movimiento m) async {
-    if (!kIsWeb) { await DatabaseHelper().insertMovimiento(m); return; }
+    if (!kIsWeb) {
+      await DatabaseHelper().insertMovimiento(m);
+      return;
+    }
     await _client.from('movimientos').upsert(_toRow(m));
+    // Aplicar delta: sumar el monto al saldo de la cuenta
+    final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
+    await _aplicarDeltaSaldo(m.cuenta, delta);
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
-    if (!kIsWeb) { await DatabaseHelper().insertMovimientos(lista); return; }
+    if (!kIsWeb) {
+      await DatabaseHelper().insertMovimientos(lista);
+      return;
+    }
     await _client.from('movimientos').upsert(lista.map(_toRow).toList());
+    // Aplicar delta por cada movimiento
+    for (final m in lista) {
+      final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
+      await _aplicarDeltaSaldo(m.cuenta, delta);
+    }
   }
 
-  Future<void> updateMovimiento(Movimiento m) async {
-    if (!kIsWeb) { await DatabaseHelper().updateMovimiento(m); return; }
-    await _client.from('movimientos').update(_toRow(m)).eq('id', m.id);
+  Future<void> updateMovimiento(Movimiento nuevo) async {
+    if (!kIsWeb) {
+      await DatabaseHelper().updateMovimiento(nuevo);
+      return;
+    }
+    // Obtener el movimiento anterior para calcular la diferencia
+    final anteriorRes = await _client
+        .from('movimientos')
+        .select('tipo, monto, cuenta')
+        .eq('id', nuevo.id)
+        .maybeSingle();
+
+    await _client.from('movimientos').update(_toRow(nuevo)).eq('id', nuevo.id);
+
+    if (anteriorRes != null) {
+      // Revertir el efecto del movimiento anterior
+      final deltaAnterior = anteriorRes['tipo'] == 'ingreso'
+          ? -(anteriorRes['monto'] as num).toDouble()
+          : (anteriorRes['monto'] as num).toDouble();
+      await _aplicarDeltaSaldo(anteriorRes['cuenta'] as String, deltaAnterior);
+    }
+    // Aplicar el efecto del movimiento nuevo
+    final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso ? nuevo.monto : -nuevo.monto;
+    await _aplicarDeltaSaldo(nuevo.cuenta, deltaNuevo);
   }
 
   Future<void> deleteMovimiento(String id) async {
-    if (!kIsWeb) { await DatabaseHelper().deleteMovimiento(id); return; }
+    if (!kIsWeb) {
+      await DatabaseHelper().deleteMovimiento(id);
+      return;
+    }
+
     if (id.endsWith('_out') || id.endsWith('_in')) {
       final base = id.replaceAll('_out', '').replaceAll('_in', '');
+      // Revertir ambos lados de la transferencia
+      await _revertirMovimientoEnSupabase('${base}_out');
+      await _revertirMovimientoEnSupabase('${base}_in');
       await _client.from('movimientos').delete().eq('id', '${base}_out');
       await _client.from('movimientos').delete().eq('id', '${base}_in');
     } else {
+      await _revertirMovimientoEnSupabase(id);
       await _client.from('movimientos').delete().eq('id', id);
     }
+  }
+
+  /// Revierte el efecto de un movimiento en saldos_cuentas antes de borrarlo
+  Future<void> _revertirMovimientoEnSupabase(String id) async {
+    final res = await _client
+        .from('movimientos')
+        .select('tipo, monto, cuenta')
+        .eq('id', id)
+        .maybeSingle();
+    if (res == null) return;
+    final delta = res['tipo'] == 'ingreso'
+        ? -(res['monto'] as num).toDouble()
+        : (res['monto'] as num).toDouble();
+    await _aplicarDeltaSaldo(res['cuenta'] as String, delta);
+  }
+
+  /// Aplica un delta al saldo_actual de una cuenta en saldos_cuentas
+  Future<void> _aplicarDeltaSaldo(String cuenta, double delta) async {
+    try {
+      // Leer saldo actual
+      final res = await _client
+          .from('saldos_cuentas')
+          .select('saldo_actual')
+          .eq('usuario_id', _uid)
+          .eq('cuenta', cuenta)
+          .maybeSingle();
+
+      double saldoActual;
+      if (res == null) {
+        // No existe — partir del saldo inicial
+        final iniciales = await SaldosService.getSaldosIniciales();
+        saldoActual = iniciales[cuenta] ?? 0;
+      } else {
+        saldoActual = (res['saldo_actual'] as num).toDouble();
+      }
+
+      await _client.from('saldos_cuentas').upsert({
+        'usuario_id':   _uid,
+        'cuenta':       cuenta,
+        'saldo_actual': saldoActual + delta,
+        'updated_at':   DateTime.now().toIso8601String(),
+      }, onConflict: 'usuario_id,cuenta');
+    } catch (_) {}
   }
 
   Future<int> countMovimientos() async {
@@ -105,22 +192,22 @@ class DataRepository {
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
       final monto = (row['monto'] as num).toDouble();
-      if (row['tipo'] == 'ingreso') ingresos += monto;
-      else egresos += monto;
+      if (row['tipo'] == 'ingreso') {
+        ingresos += monto;
+      } else {
+        egresos += monto;
+      }
     }
     return {'ingresos': ingresos, 'egresos': egresos};
   }
 
-  /// Saldos actuales:
-  /// - Móvil: saldo_inicial (shared_prefs) + movimientos SQLite → 100% offline
-  /// - Web:   lee saldos_cuentas en Supabase (calculados al sincronizar)
   Future<Map<String, double>> getSaldosPorCuenta() async {
     if (!kIsWeb) {
-      // Móvil: calcular local siempre
+      // Móvil: 100% offline — saldo_inicial + movimientos SQLite
       return DatabaseHelper().getSaldosPorCuentaLocal();
     }
 
-    // Web: leer de saldos_cuentas (precalculados al sincronizar desde app)
+    // Web: leer saldos_cuentas (actualizado con delta en cada operación)
     final saldos = await SaldosService.getSaldosIniciales();
     try {
       final res = await _client
@@ -129,7 +216,6 @@ class DataRepository {
           .eq('usuario_id', _uid);
 
       if ((res as List).isNotEmpty) {
-        // Usar saldos precalculados
         for (final row in res) {
           saldos[row['cuenta'] as String] =
               (row['saldo_actual'] as num).toDouble();
@@ -138,7 +224,7 @@ class DataRepository {
       }
     } catch (_) {}
 
-    // Fallback web: calcular sumando movimientos si no hay saldos_cuentas
+    // Fallback: calcular desde movimientos si saldos_cuentas está vacío
     final movRes = await _client
         .from('movimientos')
         .select('cuenta, tipo, monto')
@@ -147,8 +233,8 @@ class DataRepository {
     for (final row in movRes as List) {
       final cuenta = row['cuenta'] as String;
       final monto  = (row['monto'] as num).toDouble();
-      final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
-      saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+      saldos[cuenta] = (saldos[cuenta] ?? 0) +
+          (row['tipo'] == 'ingreso' ? monto : -monto);
     }
     return saldos;
   }

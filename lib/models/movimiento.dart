@@ -1,84 +1,12 @@
-// lib/models/movimiento.dart
-
 enum TipoMovimiento { ingreso, egreso }
-
-enum Categoria {
-  ingresos,
-  transporte,
-  comerFuera,
-  transferencia,
-  servicios,
-  shopping,
-  saldo,
-  hogar,
-  proviciones,
-  perdido,
-  entretenimiento,
-  pelo,
-}
-
-extension CategoriaExtension on Categoria {
-  String get nombre {
-    switch (this) {
-      case Categoria.ingresos:        return 'INGRESOS';
-      case Categoria.transporte:      return 'TRANSPORTE';
-      case Categoria.comerFuera:      return 'COMER FUERA';
-      case Categoria.transferencia:   return 'TRANSFERENCIA';
-      case Categoria.servicios:       return 'SERVICIOS';
-      case Categoria.shopping:        return 'SHOPPING';
-      case Categoria.saldo:           return 'SALDO';
-      case Categoria.hogar:           return 'HOGAR';
-      case Categoria.proviciones:     return 'PROVICIONES';
-      case Categoria.perdido:         return 'PERDIDO';
-      case Categoria.entretenimiento: return 'ENTRETENIMIENTO';
-      case Categoria.pelo:            return 'PELO';
-    }
-  }
-
-  static Categoria fromString(String s) {
-    return Categoria.values.firstWhere(
-      (c) => c.nombre == s.toUpperCase(),
-      orElse: () => Categoria.ingresos,
-    );
-  }
-}
-
-enum Cuenta {
-  billetera,
-  debitoBa,
-  debitoNiu,
-  creditoBa,
-  creditoNiu,
-  multimoney,
-}
-
-extension CuentaExtension on Cuenta {
-  String get nombre {
-    switch (this) {
-      case Cuenta.billetera:   return 'BILLETERA';
-      case Cuenta.debitoBa:    return 'DEBITO BA';
-      case Cuenta.debitoNiu:   return 'DEBITO NIU';
-      case Cuenta.creditoBa:   return 'CREDITO BA';
-      case Cuenta.creditoNiu:  return 'CREDITO NIU';
-      case Cuenta.multimoney:  return 'MULTIMONEY';
-    }
-  }
-
-  static Cuenta fromString(String s) {
-    return Cuenta.values.firstWhere(
-      (c) => c.nombre == s.toUpperCase(),
-      orElse: () => Cuenta.billetera,
-    );
-  }
-}
 
 class Movimiento {
   final String id;
   final DateTime fecha;
   final TipoMovimiento tipo;
   final double monto;
-  final Categoria categoria;
-  final Cuenta cuenta;
+  final String categoriaNombre;
+  final String cuentaNombre;
   final String? comentario;
   final int mes;
   final int anio;
@@ -89,8 +17,8 @@ class Movimiento {
     required this.fecha,
     required this.tipo,
     required this.monto,
-    required this.categoria,
-    required this.cuenta,
+    required this.categoriaNombre,
+    required this.cuentaNombre,
     this.comentario,
     required this.mes,
     int? anio,
@@ -103,8 +31,8 @@ class Movimiento {
       'fecha': fecha.toIso8601String(),
       'tipo': tipo.name,
       'monto': monto,
-      'categoria': categoria.nombre,
-      'cuenta': cuenta.nombre,
+      'categoria': categoriaNombre,
+      'cuenta': cuentaNombre,
       'comentario': comentario,
       'mes': mes,
       'anio': anio,
@@ -119,8 +47,8 @@ class Movimiento {
       fecha: fecha,
       tipo: TipoMovimiento.values.firstWhere((t) => t.name == map['tipo']),
       monto: (map['monto'] as num).toDouble(),
-      categoria: CategoriaExtension.fromString(map['categoria']),
-      cuenta: CuentaExtension.fromString(map['cuenta']),
+      categoriaNombre: map['categoria'] ?? 'INGRESOS',
+      cuentaNombre: map['cuenta'] ?? 'BILLETERA',
       comentario: map['comentario'],
       mes: map['mes'],
       anio: map['anio'] ?? fecha.year,
@@ -133,8 +61,8 @@ class Movimiento {
     DateTime? fecha,
     TipoMovimiento? tipo,
     double? monto,
-    Categoria? categoria,
-    Cuenta? cuenta,
+    String? categoriaNombre,
+    String? cuentaNombre,
     String? comentario,
     int? mes,
     int? anio,
@@ -145,12 +73,16 @@ class Movimiento {
       fecha: fecha ?? this.fecha,
       tipo: tipo ?? this.tipo,
       monto: monto ?? this.monto,
-      categoria: categoria ?? this.categoria,
-      cuenta: cuenta ?? this.cuenta,
+      categoriaNombre: categoriaNombre ?? this.categoriaNombre,
+      cuentaNombre: cuentaNombre ?? this.cuentaNombre,
       comentario: comentario ?? this.comentario,
       mes: mes ?? this.mes,
       anio: anio ?? this.anio,
       sincronizado: sincronizado ?? this.sincronizado,
     );
   }
+
+  String get categoria => categoriaNombre;
+  String get cuenta => cuentaNombre;
 }
+

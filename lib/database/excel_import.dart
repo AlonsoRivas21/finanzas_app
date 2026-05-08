@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:uuid/uuid.dart';
 import '../models/movimiento.dart';
+import 'catalogo_service.dart';
 import 'saldos_service.dart';
 
 class ExcelImportService {
@@ -56,8 +57,8 @@ class ExcelImportService {
           fecha: fecha,
           tipo: tipo,
           monto: monto,
-          categoria: CategoriaExtension.fromString(categoriaStr),
-          cuenta: CuentaExtension.fromString(cuentaStr),
+          categoriaNombre: categoriaStr.toUpperCase(),
+          cuentaNombre: cuentaStr.toUpperCase(),
           comentario: comentario,
           mes: mes,
           sincronizado: false,
@@ -88,6 +89,8 @@ class ExcelImportService {
     if (sheet == null) return null;
 
     final saldos = <String, double>{};
+    final cuentasValidas = await CatalogoService.getCuentas();
+    final nombresValidos = cuentasValidas.map((c) => c['nombre'] as String).toSet();
 
     // La pestaña BD tiene: CUENTA en col 0, SALDO INICIAL en col 1
     // Fila 0 es el encabezado, datos desde fila 1
@@ -101,7 +104,7 @@ class ExcelImportService {
       if (cuentaStr.isEmpty || saldo == null) continue;
 
       // Verificar que sea una cuenta válida
-      final esValida = Cuenta.values.any((c) => c.nombre == cuentaStr);
+      final esValida = nombresValidos.contains(cuentaStr);
       if (esValida) {
         saldos[cuentaStr] = saldo;
       }

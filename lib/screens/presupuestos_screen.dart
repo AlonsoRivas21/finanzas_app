@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/presupuesto_service.dart';
-import '../models/movimiento.dart';
+import '../database/catalogo_service.dart';
 
 class PresupuestosScreen extends StatefulWidget {
   const PresupuestosScreen({super.key});
@@ -366,6 +366,7 @@ class _PresupuestoCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(12),
         color: excedido
+            // ignore: deprecated_member_use
             ? Colors.red.shade50.withOpacity(0.5)
             : null,
       ),
@@ -501,29 +502,34 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
   final _formKey = GlobalKey<FormState>();
   final _limiteCtrl = TextEditingController();
   late String _nombre;
+  List<String> _opciones = [];
   bool _guardando = false;
+  bool _cargando = true;
 
   bool get esEdicion => widget.presupuesto != null;
-
-  List<String> get _opciones => widget.tipo == 'categoria'
-      ? Categoria.values
-          .where((c) =>
-              c != Categoria.ingresos &&
-              c != Categoria.transferencia &&
-              c != Categoria.saldo)
-          .map((c) => c.nombre)
-          .toList()
-      : Cuenta.values.map((c) => c.nombre).toList();
 
   @override
   void initState() {
     super.initState();
+    _cargarOpciones();
+  }
+
+  Future<void> _cargarOpciones() async {
+    if (widget.tipo == 'categoria') {
+      final cats = await CatalogoService.getCategorias();
+      _opciones = cats.map((c) => c['nombre'] as String).toList();
+    } else {
+      final cues = await CatalogoService.getCuentas();
+      _opciones = cues.map((c) => c['nombre'] as String).toList();
+    }
+
     _nombre = esEdicion
         ? widget.presupuesto!.nombre
         : _opciones.first;
     if (esEdicion) {
       _limiteCtrl.text = widget.presupuesto!.limite.toString();
     }
+    setState(() => _cargando = false);
   }
 
   @override
@@ -569,10 +575,13 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
       title: Text(esEdicion
           ? 'Editar presupuesto'
           : 'Nuevo presupuesto de $label'),
-      content: Form(
+      content: _cargando 
+        ? const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()))
+        : Form(
         key: _formKey,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(
+            // ignore: deprecated_member_use
             value: _nombre,
             decoration: InputDecoration(
                 labelText: label, border: const OutlineInputBorder()),

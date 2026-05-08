@@ -125,6 +125,7 @@ class _ImportarExcelScreenState extends State<ImportarExcelScreen> {
 
     try {
       final res = await ExcelImportService.importar(_rutaArchivo!);
+      // ignore: use_build_context_synchronously
       final importados = await context
           .read<MovimientosProvider>()
           .importarLista(res.movimientos);
