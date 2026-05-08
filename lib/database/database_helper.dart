@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, AppConfig.dbName);
-    return openDatabase(path, version: 5,
+    return openDatabase(path, version: 6,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -153,6 +153,20 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 6) {
+      // Migración para usar IDs como llaves en lugar de nombres
+      await db.execute('ALTER TABLE movimientos ADD COLUMN cuenta_id TEXT');
+      await db.execute('ALTER TABLE movimientos ADD COLUMN categoria_id TEXT');
+      
+      // Vincular datos existentes por nombre
+      await db.execute('''
+        UPDATE movimientos SET 
+          cuenta_id = (SELECT id FROM cuentas WHERE nombre = movimientos.cuenta),
+          categoria_id = (SELECT id FROM categorias WHERE nombre = movimientos.categoria)
+      ''');
+      
+      await db.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
+    }
   }
 
   // ── Saldos cuentas (delta) ────────────────────────────────────────────────
@@ -270,6 +284,25 @@ class DatabaseHelper {
 
   Future<void> updateCuenta(Map<String, dynamic> cuenta) async {
     final database = await db;
+
+    // 1. Obtener el nombre actual antes de actualizar para saber si cambió
+    final existing = await database.query('cuentas',
+        columns: ['nombre'], where: 'id = ?', whereArgs: [cuenta['id']]);
+
+    if (existing.isNotEmpty) {
+      final oldNombre = existing.first['nombre'] as String;
+      final newNombre = (cuenta['nombre'] as String).toUpperCase();
+
+      if (oldNombre != newNombre) {
+        // 2. Propagar el cambio de nombre a movimientos y saldos calculados
+        await database.update('movimientos', {'cuenta': newNombre},
+            where: 'cuenta = ?', whereArgs: [oldNombre]);
+
+        await database.update('saldos_cuentas', {'cuenta': newNombre},
+            where: 'cuenta = ?', whereArgs: [oldNombre]);
+      }
+    }
+
     await database.update('cuentas', cuenta,
         where: 'id = ?', whereArgs: [cuenta['id']]);
   }
@@ -343,6 +376,22 @@ class DatabaseHelper {
 
   Future<void> updateCategoria(Map<String, dynamic> cat) async {
     final database = await db;
+
+    // 1. Obtener el nombre actual antes de actualizar
+    final existing = await database.query('categorias',
+        columns: ['nombre'], where: 'id = ?', whereArgs: [cat['id']]);
+
+    if (existing.isNotEmpty) {
+      final oldNombre = existing.first['nombre'] as String;
+      final newNombre = (cat['nombre'] as String).toUpperCase();
+
+      if (oldNombre != newNombre) {
+        // 2. Propagar a movimientos
+        await database.update('movimientos', {'categoria': newNombre},
+            where: 'categoria = ?', whereArgs: [oldNombre]);
+      }
+    }
+
     await database.update('categorias', cat,
         where: 'id = ?', whereArgs: [cat['id']]);
   }
