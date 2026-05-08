@@ -134,14 +134,30 @@ class CatalogoService {
 
   static Future<void> actualizarCuenta(Map<String, dynamic> cuenta) async {
     if (kIsWeb) {
+      final newNombre = (cuenta['nombre'] as String).toUpperCase();
+      
+      // Obtener nombre viejo en Supabase
+      final oldData = await _client.from('cuentas')
+          .select('nombre').eq('id', cuenta['id']).maybeSingle();
+      final oldNombre = oldData?['nombre'] as String?;
+
       await _client.from('cuentas')
           .update({
-            'nombre': cuenta['nombre'],
+            'nombre': newNombre,
             'tipo': cuenta['tipo'],
             'saldo_inicial': cuenta['saldo_inicial'],
             'activa': _toBool(cuenta['activa']),
           })
           .eq('id', cuenta['id']);
+
+      if (oldNombre != null && oldNombre != newNombre) {
+        // Actualización en cascada en la nube
+        await _client.from('movimientos').update({'cuenta': newNombre})
+            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
+            
+        await _client.from('saldos_cuentas').update({'cuenta': newNombre})
+            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
+      }
     } else {
       final db = DatabaseHelper();
       await db.updateCuenta({
@@ -236,14 +252,25 @@ class CatalogoService {
 
   static Future<void> actualizarCategoria(Map<String, dynamic> cat) async {
     if (kIsWeb) {
+      final newNombre = (cat['nombre'] as String).toUpperCase();
+      final oldData = await _client.from('categorias')
+          .select('nombre').eq('id', cat['id']).maybeSingle();
+      final oldNombre = oldData?['nombre'] as String?;
+
       await _client.from('categorias')
           .update({
-            'nombre': cat['nombre'],
+            'nombre': newNombre,
             'tipo': cat['tipo'],
             'icono': cat['icono'],
             'activa': _toBool(cat['activa']),
           })
           .eq('id', cat['id']);
+
+      if (oldNombre != null && oldNombre != newNombre) {
+        // Actualización en cascada en la nube
+        await _client.from('movimientos').update({'categoria': newNombre})
+            .eq('usuario_id', _uid).eq('categoria', oldNombre);
+      }
     } else {
       await DatabaseHelper().updateCategoria({
         ...cat,
