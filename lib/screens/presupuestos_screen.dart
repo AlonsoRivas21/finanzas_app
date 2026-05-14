@@ -69,6 +69,22 @@ class _PresupuestosScreenState extends State<PresupuestosScreen>
     if (res == true) _cargar();
   }
 
+  Future<void> _mostrarMasivo({required String tipo}) async {
+    final existentes = (tipo == 'categoria' ? _porCategoria : _porCuenta)
+        .map((p) => p.nombre).toList();
+
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DialogoMasivo(
+        tipo: tipo,
+        mes: _mes,
+        anio: _anio,
+        existentes: existentes,
+      ),
+    );
+    if (res == true) _cargar();
+  }
+
   Future<void> _eliminar(PresupuestoModel p) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -126,6 +142,12 @@ class _PresupuestosScreenState extends State<PresupuestosScreen>
             ),
           ),
           const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.library_add_outlined),
+            tooltip: 'Agregar varios',
+            onPressed: () => _mostrarMasivo(tipo: _tab.index == 0 ? 'categoria' : 'cuenta'),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: _cargando
@@ -153,6 +175,163 @@ class _PresupuestosScreenState extends State<PresupuestosScreen>
                 ),
               ],
             ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _mostrarForm(tipo: _tab.index == 0 ? 'categoria' : 'cuenta'),
+        tooltip: 'Nuevo presupuesto',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+// ── Diálogo Masivo ──────────────────────────────────────────────────────────
+
+class _DialogoMasivo extends StatefulWidget {
+  final String tipo;
+  final int mes;
+  final int anio;
+  final List<String> existentes;
+  const _DialogoMasivo({
+    required this.tipo,
+    required this.mes,
+    required this.anio,
+    required this.existentes,
+  });
+
+  @override
+  State<_DialogoMasivo> createState() => _DialogoMasivoState();
+}
+
+class _DialogoMasivoState extends State<_DialogoMasivo> {
+  final _limiteCtrl = TextEditingController(text: '0');
+  List<String> _opciones = [];
+  final Set<String> _seleccionados = {};
+  bool _cargando = true;
+  bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarOpciones();
+  }
+
+  Future<void> _cargarOpciones() async {
+    List<Map<String, dynamic>> data;
+    if (widget.tipo == 'categoria') {
+      data = await CatalogoService.getCategorias();
+    } else {
+      data = await CatalogoService.getCuentas();
+    }
+    
+    setState(() {
+      _opciones = data
+          .map((e) => e['nombre'] as String)
+          .where((n) => !widget.existentes.contains(n))
+          .toList();
+      _cargando = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _limiteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (_seleccionados.isEmpty) return;
+    setState(() => _guardando = true);
+    final limite = double.tryParse(_limiteCtrl.text.replaceAll(',', '.')) ?? 0;
+
+    try {
+      for (final nombre in _seleccionados) {
+        await PresupuestoService.guardar(
+          PresupuestoService.crear(
+            tipo: widget.tipo,
+            nombre: nombre,
+            limite: limite,
+            mes: widget.mes,
+            anio: widget.anio,
+          ),
+        );
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.tipo == 'categoria' ? 'categorías' : 'cuentas';
+    return AlertDialog(
+      title: Text('Agregar $label'),
+      content: _cargando 
+        ? const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()))
+        : SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _limiteCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Límite para todos',
+                    prefixText: '\$ ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Selecciona para agregar:', 
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                if (_opciones.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('No hay más elementos disponibles.', 
+                        style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _opciones.length,
+                      itemBuilder: (context, index) {
+                        final op = _opciones[index];
+                        return CheckboxListTile(
+                          title: Text(op, style: const TextStyle(fontSize: 14)),
+                          value: _seleccionados.contains(op),
+                          onChanged: (val) {
+                            setState(() {
+                              if (val == true) _seleccionados.add(op);
+                              else _seleccionados.remove(op);
+                            });
+                          },
+                          controlAffinity: ListTileControlAffinity.leading,
+                          dense: true,
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: _seleccionados.isEmpty || _guardando ? null : _guardar,
+          child: _guardando 
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Text('Agregar seleccionados'),
+        ),
+      ],
     );
   }
 }
@@ -548,6 +727,7 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
     try {
       await PresupuestoService.guardar(
         PresupuestoService.crear(
+          id: esEdicion ? widget.presupuesto!.id : null,
           tipo:   widget.tipo,
           nombre: _nombre,
           limite: limite,

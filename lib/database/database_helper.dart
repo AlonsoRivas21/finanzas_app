@@ -488,6 +488,7 @@ class DatabaseHelper {
     }
     await database.update('movimientos', nuevo.toMap(),
         where: 'id = ?', whereArgs: [nuevo.id]);
+    await database.update('movimientos', {'sincronizado': 0}, where: 'id = ?', whereArgs: [nuevo.id]); // Marcar como no sincronizado para que se suba
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso
         ? nuevo.monto : -nuevo.monto;
     await aplicarDeltaSaldo(nuevo.cuentaNombre, deltaNuevo);
