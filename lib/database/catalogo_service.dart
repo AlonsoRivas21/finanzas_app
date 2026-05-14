@@ -134,12 +134,11 @@ class CatalogoService {
 
   static Future<void> actualizarCuenta(Map<String, dynamic> cuenta) async {
     final newNombre = (cuenta['nombre'] as String).toUpperCase();
-    String? oldNombre;
 
     if (kIsWeb) {
       final oldData = await _client.from('cuentas')
           .select('nombre').eq('id', cuenta['id']).maybeSingle();
-      oldNombre = oldData?['nombre'] as String?;
+      final oldNombre = oldData?['nombre'] as String?;
       
       await _client.from('cuentas')
           .update({
@@ -149,36 +148,21 @@ class CatalogoService {
             'activa': _toBool(cuenta['activa']),
           })
           .eq('id', cuenta['id']);
+
+      if (oldNombre != null && oldNombre != newNombre) {
+        await _client.from('movimientos').update({'cuenta': newNombre})
+            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
+        await _client.from('saldos_cuentas').update({'cuenta': newNombre})
+            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
+      }
     } else {
       final db = DatabaseHelper();
-      // Obtener nombre viejo localmente antes de actualizar
-      final existing = await (await db.db).query('cuentas', 
-          columns: ['nombre'], where: 'id = ?', whereArgs: [cuenta['id']]);
-      oldNombre = existing.isNotEmpty ? existing.first['nombre'] as String : null;
-
       await db.updateCuenta({
         ...cuenta,
         'activa': _toInt(cuenta['activa']),
         'sincronizado': 0
       });
       await db.recalibrarSaldosLocales();
-
-      // Si está autenticado, intentar propagar a la nube de una vez
-      if (_autenticado) {
-        await _client.from('cuentas').update({
-          'nombre': newNombre,
-          'tipo': cuenta['tipo'],
-          'saldo_inicial': cuenta['saldo_inicial'],
-        }).eq('id', cuenta['id']).eq('usuario_id', _uid);
-      }
-    }
-
-    // Propagación en cascada en Supabase (Web o Mobile online)
-    if (_autenticado && oldNombre != null && oldNombre != newNombre) {
-      await _client.from('movimientos').update({'cuenta': newNombre})
-          .eq('usuario_id', _uid).eq('cuenta', oldNombre);
-      await _client.from('saldos_cuentas').update({'cuenta': newNombre})
-          .eq('usuario_id', _uid).eq('cuenta', oldNombre);
     }
   }
 
@@ -265,12 +249,11 @@ class CatalogoService {
 
   static Future<void> actualizarCategoria(Map<String, dynamic> cat) async {
     final newNombre = (cat['nombre'] as String).toUpperCase();
-    String? oldNombre;
 
     if (kIsWeb) {
       final oldData = await _client.from('categorias')
           .select('nombre').eq('id', cat['id']).maybeSingle();
-      oldNombre = oldData?['nombre'] as String?;
+      final oldNombre = oldData?['nombre'] as String?;
 
       await _client.from('categorias')
           .update({
@@ -280,30 +263,18 @@ class CatalogoService {
             'activa': _toBool(cat['activa']),
           })
           .eq('id', cat['id']);
+
+      if (oldNombre != null && oldNombre != newNombre) {
+        await _client.from('movimientos').update({'categoria': newNombre})
+            .eq('usuario_id', _uid).eq('categoria', oldNombre);
+      }
     } else {
       final db = DatabaseHelper();
-      final existing = await (await db.db).query('categorias', 
-          columns: ['nombre'], where: 'id = ?', whereArgs: [cat['id']]);
-      oldNombre = existing.isNotEmpty ? existing.first['nombre'] as String : null;
-
       await db.updateCategoria({
         ...cat,
         'activa': _toInt(cat['activa']),
         'sincronizado': 0
       });
-
-      if (_autenticado) {
-        await _client.from('categorias').update({
-          'nombre': newNombre,
-          'tipo': cat['tipo'],
-          'icono': cat['icono'],
-        }).eq('id', cat['id']).eq('usuario_id', _uid);
-      }
-    }
-
-    if (_autenticado && oldNombre != null && oldNombre != newNombre) {
-      await _client.from('movimientos').update({'categoria': newNombre})
-          .eq('usuario_id', _uid).eq('categoria', oldNombre);
     }
   }
 
