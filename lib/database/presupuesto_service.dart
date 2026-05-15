@@ -210,7 +210,7 @@ class PresupuestoService {
     final rows = await db.rawQuery('''
       SELECT categoria, SUM(monto) as total
       FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso'
+      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
       GROUP BY categoria
     ''', [mes, anio]);
 
@@ -226,7 +226,7 @@ class PresupuestoService {
     final rows = await db.rawQuery('''
       SELECT cuenta, SUM(monto) as total
       FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso'
+      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
       GROUP BY cuenta
     ''', [mes, anio]);
 
