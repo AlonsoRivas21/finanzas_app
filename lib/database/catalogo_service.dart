@@ -133,14 +133,13 @@ class CatalogoService {
   }
 
   static Future<void> actualizarCuenta(Map<String, dynamic> cuenta) async {
+    final newNombre = (cuenta['nombre'] as String).toUpperCase();
+
     if (kIsWeb) {
-      final newNombre = (cuenta['nombre'] as String).toUpperCase();
-      
-      // Obtener nombre viejo en Supabase
       final oldData = await _client.from('cuentas')
           .select('nombre').eq('id', cuenta['id']).maybeSingle();
       final oldNombre = oldData?['nombre'] as String?;
-
+      
       await _client.from('cuentas')
           .update({
             'nombre': newNombre,
@@ -151,10 +150,8 @@ class CatalogoService {
           .eq('id', cuenta['id']);
 
       if (oldNombre != null && oldNombre != newNombre) {
-        // Actualización en cascada en la nube
         await _client.from('movimientos').update({'cuenta': newNombre})
             .eq('usuario_id', _uid).eq('cuenta', oldNombre);
-            
         await _client.from('saldos_cuentas').update({'cuenta': newNombre})
             .eq('usuario_id', _uid).eq('cuenta', oldNombre);
       }
@@ -251,8 +248,9 @@ class CatalogoService {
   }
 
   static Future<void> actualizarCategoria(Map<String, dynamic> cat) async {
+    final newNombre = (cat['nombre'] as String).toUpperCase();
+
     if (kIsWeb) {
-      final newNombre = (cat['nombre'] as String).toUpperCase();
       final oldData = await _client.from('categorias')
           .select('nombre').eq('id', cat['id']).maybeSingle();
       final oldNombre = oldData?['nombre'] as String?;
@@ -267,12 +265,12 @@ class CatalogoService {
           .eq('id', cat['id']);
 
       if (oldNombre != null && oldNombre != newNombre) {
-        // Actualización en cascada en la nube
         await _client.from('movimientos').update({'categoria': newNombre})
             .eq('usuario_id', _uid).eq('categoria', oldNombre);
       }
     } else {
-      await DatabaseHelper().updateCategoria({
+      final db = DatabaseHelper();
+      await db.updateCategoria({
         ...cat,
         'activa': _toInt(cat['activa']),
         'sincronizado': 0
@@ -297,6 +295,21 @@ class CatalogoService {
     // Cuentas
     final cuentasPend = await db.getCuentasNoSincronizadas();
     if (cuentasPend.isNotEmpty) {
+      // Verificar cambios de nombre antes del upsert para no perder historial en nube
+      for (final c in cuentasPend) {
+        final cloudData = await _client.from('cuentas')
+            .select('nombre').eq('id', c['id']).maybeSingle();
+        final oldNameCloud = cloudData?['nombre'] as String?;
+        final newNameLocal = (c['nombre'] as String).toUpperCase();
+
+        if (oldNameCloud != null && oldNameCloud != newNameLocal) {
+          await _client.from('movimientos').update({'cuenta': newNameLocal})
+              .eq('usuario_id', _uid).eq('cuenta', oldNameCloud);
+          await _client.from('saldos_cuentas').update({'cuenta': newNameLocal})
+              .eq('usuario_id', _uid).eq('cuenta', oldNameCloud);
+        }
+      }
+
       final rows = cuentasPend.map((c) {
         final map = Map<String, dynamic>.from(c);
         map['usuario_id'] = _uid;
@@ -321,6 +334,18 @@ class CatalogoService {
     // Categorías
     final catsPend = await db.getCategoriasNoSincronizadas();
     if (catsPend.isNotEmpty) {
+      for (final c in catsPend) {
+        final cloudData = await _client.from('categorias')
+            .select('nombre').eq('id', c['id']).maybeSingle();
+        final oldNameCloud = cloudData?['nombre'] as String?;
+        final newNameLocal = (c['nombre'] as String).toUpperCase();
+
+        if (oldNameCloud != null && oldNameCloud != newNameLocal) {
+          await _client.from('movimientos').update({'categoria': newNameLocal})
+              .eq('usuario_id', _uid).eq('categoria', oldNameCloud);
+        }
+      }
+
       final rows = catsPend.map((c) {
         final map = Map<String, dynamic>.from(c);
         map['usuario_id'] = _uid;

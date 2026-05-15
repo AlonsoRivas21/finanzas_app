@@ -294,8 +294,12 @@ class DatabaseHelper {
       final newNombre = (cuenta['nombre'] as String).toUpperCase();
 
       if (oldNombre != newNombre) {
-        // 2. Propagar el cambio de nombre a movimientos y saldos calculados
-        await database.update('movimientos', {'cuenta': newNombre},
+        // 2. Propagar el cambio a movimientos y marcar para re-sincronizar
+        // Es vital poner sincronizado = 0 para que la nube se entere del cambio de nombre
+        await database.update('movimientos', {
+          'cuenta': newNombre,
+          'sincronizado': 0 
+        },
             where: 'cuenta = ?', whereArgs: [oldNombre]);
 
         await database.update('saldos_cuentas', {'cuenta': newNombre},
@@ -304,7 +308,8 @@ class DatabaseHelper {
     }
 
     await database.update('cuentas', cuenta,
-        where: 'id = ?', whereArgs: [cuenta['id']]);
+        where: 'id = ?', whereArgs: [cuenta['id']]); // Actualiza otros campos de la cuenta
+    await database.update('cuentas', {'sincronizado': 0}, where: 'id = ?', whereArgs: [cuenta['id']]); // Asegura que la cuenta misma se marque como no sincronizada
   }
 
   Future<void> deleteCuenta(String id) async {
@@ -386,14 +391,18 @@ class DatabaseHelper {
       final newNombre = (cat['nombre'] as String).toUpperCase();
 
       if (oldNombre != newNombre) {
-        // 2. Propagar a movimientos
-        await database.update('movimientos', {'categoria': newNombre},
+        // 2. Propagar a movimientos y marcar para re-sincronizar
+        await database.update('movimientos', {
+          'categoria': newNombre,
+          'sincronizado': 0
+        },
             where: 'categoria = ?', whereArgs: [oldNombre]);
       }
     }
 
     await database.update('categorias', cat,
-        where: 'id = ?', whereArgs: [cat['id']]);
+        where: 'id = ?', whereArgs: [cat['id']]); // Actualiza otros campos de la categoría
+    await database.update('categorias', {'sincronizado': 0}, where: 'id = ?', whereArgs: [cat['id']]); // Asegura que la categoría misma se marque como no sincronizada
   }
 
   Future<void> deleteCategoria(String id) async {
@@ -479,6 +488,7 @@ class DatabaseHelper {
     }
     await database.update('movimientos', nuevo.toMap(),
         where: 'id = ?', whereArgs: [nuevo.id]);
+    await database.update('movimientos', {'sincronizado': 0}, where: 'id = ?', whereArgs: [nuevo.id]); // Marcar como no sincronizado para que se suba
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso
         ? nuevo.monto : -nuevo.monto;
     await aplicarDeltaSaldo(nuevo.cuentaNombre, deltaNuevo);
