@@ -244,7 +244,7 @@ class PresupuestoService {
     required int anio, String? id,
   }) {
     return PresupuestoModel(
-      id:     _uuid.v4(),
+      id:     id ?? _uuid.v4(),
       tipo:   tipo,
       nombre: nombre,
       limite: limite,

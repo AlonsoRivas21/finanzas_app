@@ -310,8 +310,11 @@ class _DialogoMasivoState extends State<_DialogoMasivo> {
                           value: _seleccionados.contains(op),
                           onChanged: (val) {
                             setState(() {
-                              if (val == true) _seleccionados.add(op);
-                              else _seleccionados.remove(op);
+                              if (val == true) {
+                                _seleccionados.add(op);
+                              } else {
+                                _seleccionados.remove(op);
+                              }
                             });
                           },
                           controlAffinity: ListTileControlAffinity.leading,

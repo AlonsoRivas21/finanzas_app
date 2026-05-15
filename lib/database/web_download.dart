@@ -3,10 +3,12 @@
 
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 @JS()
-external void downloadExcelFile(List<int> bytes, String filename);
+external void downloadExcelFile(JSUint8Array bytes, String filename);
 
 void downloadFile(List<int> bytes, String filename) {
-  downloadExcelFile(bytes, filename);
+  final uint8List = Uint8List.fromList(bytes);
+  downloadExcelFile(uint8List.toJS, filename);
 }
