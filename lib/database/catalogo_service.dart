@@ -41,45 +41,13 @@ class CatalogoService {
 
   // ── Predeterminados ───────────────────────────────────────────────────────
 
-  static List<Map<String, dynamic>> get _cuentasPredeterminadas => [
-    {'id': _uuid.v4(), 'nombre': 'BILLETERA',   'tipo': 'efectivo', 'saldo_inicial': 0.0, 'activa': 1, 'orden': 0, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'DEBITO BA',   'tipo': 'debito',   'saldo_inicial': 0.0, 'activa': 1, 'orden': 1, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'DEBITO NIU',  'tipo': 'debito',   'saldo_inicial': 0.0, 'activa': 1, 'orden': 2, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'CREDITO BA',  'tipo': 'credito',  'saldo_inicial': 0.0, 'activa': 1, 'orden': 3, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'CREDITO NIU', 'tipo': 'credito',  'saldo_inicial': 0.0, 'activa': 1, 'orden': 4, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'MULTIMONEY',  'tipo': 'ahorro',   'saldo_inicial': 0.0, 'activa': 1, 'orden': 5, 'sincronizado': 0},
-  ];
-
-  static List<Map<String, dynamic>> get _categoriasPredeterminadas => [
-    {'id': _uuid.v4(), 'nombre': 'INGRESOS',        'tipo': 'ingreso', 'icono': 'savings',               'activa': 1, 'orden': 0,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'TRANSPORTE',      'tipo': 'egreso',  'icono': 'directions_bus',         'activa': 1, 'orden': 1,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'COMER FUERA',     'tipo': 'egreso',  'icono': 'restaurant',             'activa': 1, 'orden': 2,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'TRANSFERENCIA',   'tipo': 'ambos',   'icono': 'swap_horiz',             'activa': 1, 'orden': 3,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'SERVICIOS',       'tipo': 'egreso',  'icono': 'receipt',                'activa': 1, 'orden': 4,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'SHOPPING',        'tipo': 'egreso',  'icono': 'shopping_bag',           'activa': 1, 'orden': 5,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'SALDO',           'tipo': 'ambos',   'icono': 'account_balance_wallet', 'activa': 1, 'orden': 6,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'HOGAR',           'tipo': 'egreso',  'icono': 'home',                   'activa': 1, 'orden': 7,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'PROVICIONES',     'tipo': 'egreso',  'icono': 'shopping_cart',          'activa': 1, 'orden': 8,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'PERDIDO',         'tipo': 'egreso',  'icono': 'money_off',              'activa': 1, 'orden': 9,  'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'ENTRETENIMIENTO', 'tipo': 'egreso',  'icono': 'movie',                  'activa': 1, 'orden': 10, 'sincronizado': 0},
-    {'id': _uuid.v4(), 'nombre': 'PELO',            'tipo': 'egreso',  'icono': 'content_cut',            'activa': 1, 'orden': 11, 'sincronizado': 0},
-  ];
-
   // ── Cuentas ───────────────────────────────────────────────────────────────
 
   static Future<List<Map<String, dynamic>>> getCuentas() async {
     if (kIsWeb) return _getCuentasWeb();
 
     final db = DatabaseHelper();
-    var cuentas = await db.getCuentas();
-
-    if (cuentas.isEmpty) {
-      // Primera vez — insertar predeterminadas
-      for (final c in _cuentasPredeterminadas) {
-        await db.insertCuenta(c);
-      }
-      cuentas = await db.getCuentas();
-    }
+    final cuentas = await db.getCuentas();
     return cuentas.map(_normCuenta).toList();
   }
 
@@ -92,21 +60,7 @@ class CatalogoService {
         .eq('activa', true)
         .order('orden');
 
-    if ((res as List).isEmpty) {
-      // Primera vez en web — crear predeterminadas
-      await _crearCuentasPredeterminadasEnSupabase();
-      return _getCuentasWeb();
-    }
     return List<Map<String, dynamic>>.from(res).map(_normCuenta).toList();
-  }
-
-  static Future<void> _crearCuentasPredeterminadasEnSupabase() async {
-    final rows = _cuentasPredeterminadas.map((c) => {
-      ...c,
-      'usuario_id': _uid,
-      'activa': true, // Supabase espera bool
-    }).toList();
-    await _client.from('cuentas').insert(rows);
   }
 
   static Future<void> crearCuenta({
@@ -180,14 +134,7 @@ class CatalogoService {
     if (kIsWeb) return _getCategoriasWeb(tipo: tipo);
 
     final db = DatabaseHelper();
-    var cats = await db.getCategorias(tipo: tipo);
-
-    if (cats.isEmpty && tipo == null) {
-      for (final c in _categoriasPredeterminadas) {
-        await db.insertCategoria(c);
-      }
-      cats = await db.getCategorias(tipo: tipo);
-    }
+    final cats = await db.getCategorias(tipo: tipo);
     return cats.map(_normCat).toList();
   }
 
@@ -202,26 +149,12 @@ class CatalogoService {
 
     final res = await query.order('orden');
 
-    if ((res as List).isEmpty) {
-      await _crearCategoriasPredeterminadasEnSupabase();
-      return _getCategoriasWeb(tipo: tipo);
-    }
-    
-    var lista = List<Map<String, dynamic>>.from(res).map(_normCat).toList();
+    var lista = List<Map<String, dynamic>>.from(res as List).map(_normCat).toList();
     if (tipo != null) {
       lista = lista.where((c) =>
           c['tipo'] == tipo || c['tipo'] == 'ambos').toList();
     }
     return lista.toList();
-  }
-
-  static Future<void> _crearCategoriasPredeterminadasEnSupabase() async {
-    final rows = _categoriasPredeterminadas.map((c) => {
-      ...c,
-      'usuario_id': _uid,
-      'activa': true, // Supabase espera bool
-    }).toList();
-    await _client.from('categorias').insert(rows);
   }
 
   static Future<void> crearCategoria({
