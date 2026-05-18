@@ -286,12 +286,14 @@ class DatabaseHelper {
     final database = await db;
 
     // 1. Obtener el nombre actual antes de actualizar para saber si cambió
-    final existing = await database.query('cuentas',
+    final existing = await database.query('cuentas', 
         columns: ['nombre'], where: 'id = ?', whereArgs: [cuenta['id']]);
+
+    // Asegurar que el nombre en el objeto cuenta sea consistente (Mayúsculas)
+    final String newNombre = (cuenta['nombre'] as String).toUpperCase();
 
     if (existing.isNotEmpty) {
       final oldNombre = existing.first['nombre'] as String;
-      final newNombre = (cuenta['nombre'] as String).toUpperCase();
 
       if (oldNombre != newNombre) {
         // 2. Propagar el cambio a movimientos y marcar para re-sincronizar
@@ -307,9 +309,16 @@ class DatabaseHelper {
       }
     }
 
-    await database.update('cuentas', cuenta,
+    // Actualizar el mapa que se va a guardar para que sea consistente
+    final cuentaParaGuardar = Map<String, dynamic>.from(cuenta);
+    cuentaParaGuardar['nombre'] = newNombre;
+
+    await database.update('cuentas', cuentaParaGuardar,
         where: 'id = ?', whereArgs: [cuenta['id']]); // Actualiza otros campos de la cuenta
     await database.update('cuentas', {'sincronizado': 0}, where: 'id = ?', whereArgs: [cuenta['id']]); // Asegura que la cuenta misma se marque como no sincronizada
+
+    // 3. RECALIBRAR: Es vital para limpiar la tabla saldos_cuentas de nombres viejos
+    await recalibrarSaldosLocales();
   }
 
   Future<void> deleteCuenta(String id) async {
