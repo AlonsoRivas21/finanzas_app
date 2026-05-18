@@ -191,13 +191,13 @@ class DataRepository {
 
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
-      final cat = row['categoria'] as String;
-      if (cat == 'TRANSFERENCIA') continue;
-
+      final cat = (row['categoria'] as String).toUpperCase().trim();
+      final tipo = row['tipo'] as String;
       final monto = (row['monto'] as num).toDouble();
-      if (row['tipo'] == 'ingreso') {
+
+      if (tipo == 'ingreso' && cat == 'INGRESOS') {
         ingresos += monto;
-      } else {
+      } else if (tipo == 'egreso' && cat != 'TRANSFERENCIA') {
         egresos += monto;
       }
     }

@@ -563,8 +563,11 @@ class DatabaseHelper {
       SELECT tipo, SUM(monto) as total
       FROM movimientos 
       WHERE mes = ? 
-        AND anio = ? 
-        AND categoria NOT IN ('TRANSFERENCIA')
+        AND anio = ?
+        AND (
+          (tipo = 'egreso' AND UPPER(TRIM(categoria)) != 'TRANSFERENCIA')
+          OR (tipo = 'ingreso' AND UPPER(TRIM(categoria)) = 'INGRESOS')
+        )
       GROUP BY tipo
     ''', [mes, anio]);
     double ingresos = 0, egresos = 0;
