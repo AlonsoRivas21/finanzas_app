@@ -561,7 +561,13 @@ class DatabaseHelper {
     final database = await db;
     final result = await database.rawQuery('''
       SELECT tipo, SUM(monto) as total
-      FROM movimientos WHERE mes = ? AND anio = ?
+      FROM movimientos 
+      WHERE mes = ? 
+        AND anio = ?
+        AND (
+          (tipo = 'egreso' AND UPPER(TRIM(categoria)) != 'TRANSFERENCIA')
+          OR (tipo = 'ingreso' AND UPPER(TRIM(categoria)) = 'INGRESOS')
+        )
       GROUP BY tipo
     ''', [mes, anio]);
     double ingresos = 0, egresos = 0;

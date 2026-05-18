@@ -184,17 +184,20 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getResumenMes(mes, anio);
 
     final res = await _client.from('movimientos')
-        .select('tipo, monto')
+        .select('tipo, monto, categoria')
         .eq('usuario_id', _uid)
         .eq('mes', mes)
         .eq('anio', anio);
 
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
+      final cat = (row['categoria'] as String).toUpperCase().trim();
+      final tipo = row['tipo'] as String;
       final monto = (row['monto'] as num).toDouble();
-      if (row['tipo'] == 'ingreso') {
+
+      if (tipo == 'ingreso' && cat == 'INGRESOS') {
         ingresos += monto;
-      } else {
+      } else if (tipo == 'egreso' && cat != 'TRANSFERENCIA') {
         egresos += monto;
       }
     }
@@ -277,7 +280,7 @@ class DataRepository {
 
     for (final row in res as List) {
       final cat = row['categoria'] as String;
-      if (cat == 'TRANSFERENCIA' || cat == 'SALDO') continue;
+      if (cat == 'TRANSFERENCIA') continue;
       final dia = int.parse((row['fecha'] as String).substring(8, 10));
       final s   = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
       final monto = (row['monto'] as num).toDouble();
