@@ -60,7 +60,7 @@ class CatalogoService {
         .eq('activa', true)
         .order('orden');
 
-    return List<Map<String, dynamic>>.from(res).map(_normCuenta).toList();
+    return (res as List).map((e) => _normCuenta(Map<String, dynamic>.from(e))).toList();
   }
 
   static Future<void> crearCuenta({
@@ -80,7 +80,11 @@ class CatalogoService {
     };
 
     if (kIsWeb) {
-      await _client.from('cuentas').insert({...cuenta, 'usuario_id': _uid, 'activa': true});
+      final cloudMap = Map<String, dynamic>.from(cuenta);
+      cloudMap['usuario_id'] = _uid;
+      cloudMap['activa'] = true;
+      cloudMap.remove('sincronizado'); // Evita error si la columna no existe en Supabase
+      await _client.from('cuentas').insert(cloudMap);
     } else {
       await DatabaseHelper().insertCuenta(cuenta);
     }
@@ -174,7 +178,11 @@ class CatalogoService {
     };
 
     if (kIsWeb) {
-      await _client.from('categorias').insert({...cat, 'usuario_id': _uid, 'activa': true});
+      final cloudMap = Map<String, dynamic>.from(cat);
+      cloudMap['usuario_id'] = _uid;
+      cloudMap['activa'] = true;
+      cloudMap.remove('sincronizado'); // Evita error si la columna no existe en Supabase
+      await _client.from('categorias').insert(cloudMap);
     } else {
       await DatabaseHelper().insertCategoria(cat);
     }

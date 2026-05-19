@@ -1,6 +1,7 @@
 // lib/database/supabase_service.dart
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/movimiento.dart';
 import 'database_helper.dart';
 import 'presupuesto_service.dart';
@@ -28,6 +29,7 @@ class SupabaseService {
   // ── Subida ────────────────────────────────────────────────────────────────
 
   static Future<int> subir() async {
+    if (kIsWeb) return 0;
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
     final db  = DatabaseHelper();
     final uid = usuarioActual!.id;
@@ -86,6 +88,7 @@ class SupabaseService {
   // ── Bajada ────────────────────────────────────────────────────────────────
 
   static Future<int> bajar() async {
+    if (kIsWeb) return 0;
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
     final db = DatabaseHelper();
 
@@ -173,6 +176,11 @@ class SupabaseService {
   // ── Sincronización ────────────────────────────────────────────────────────
 
   static Future<({String accion, int cantidad})> sincronizar() async {
+    if (kIsWeb) {
+      // En web no hay base de datos local que sincronizar
+      return (accion: 'web', cantidad: 0);
+    }
+
     if (!estaAutenticado) throw Exception('Debes iniciar sesión primero');
 
     final db = DatabaseHelper();

@@ -63,6 +63,7 @@ class SaldosService {
   // ── Privados ──────────────────────────────────────────────────────────────
 
   static Future<void> _guardarLocal(Map<String, double> saldos) async {
+    if (kIsWeb) return;
     for (final entry in saldos.entries) {
       await DatabaseHelper().updateSaldoInicial(entry.key, entry.value);
     }

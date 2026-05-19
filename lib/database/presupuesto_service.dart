@@ -1,5 +1,6 @@
 // lib/database/presupuesto_service.dart
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -84,6 +85,17 @@ class PresupuestoService {
 
   static Future<List<PresupuestoModel>> getPresupuestos(
       int mes, int anio) async {
+    if (kIsWeb) {
+      if (!_autenticado) return [];
+      final res = await _client
+          .from('presupuestos')
+          .select()
+          .eq('usuario_id', _uid)
+          .eq('mes', mes)
+          .eq('anio', anio)
+          .order('tipo');
+      return List<Map<String, dynamic>>.from(res as List).map(PresupuestoModel.fromMap).toList();
+    }
     final db = await _db;
     final rows = await db.query(
       'presupuestos',
@@ -95,6 +107,11 @@ class PresupuestoService {
   }
 
   static Future<void> guardar(PresupuestoModel p) async {
+    if (kIsWeb) {
+      await _client.from('presupuestos')
+          .upsert(p.toSupabaseMap(_uid), onConflict: 'usuario_id,tipo,categoria,mes,anio');
+      return;
+    }
     final db = await _db;
     await db.insert(
       'presupuestos',
@@ -104,6 +121,10 @@ class PresupuestoService {
   }
 
   static Future<void> eliminar(String id) async {
+    if (kIsWeb) {
+      await _client.from('presupuestos').delete().eq('id', id);
+      return;
+    }
     final db = await _db;
     await db.delete('presupuestos', where: 'id = ?', whereArgs: [id]);
     // Registrar eliminación para sync
@@ -115,6 +136,7 @@ class PresupuestoService {
   }
 
   static Future<List<PresupuestoModel>> getNoSincronizados() async {
+    if (kIsWeb) return [];
     final db = await _db;
     await db.execute('''
       CREATE TABLE IF NOT EXISTS presupuestos_eliminados (
@@ -128,6 +150,7 @@ class PresupuestoService {
   }
 
   static Future<List<String>> getEliminadosPendientes() async {
+    if (kIsWeb) return [];
     final db = await _db;
     await db.execute('''
       CREATE TABLE IF NOT EXISTS presupuestos_eliminados (
@@ -140,6 +163,7 @@ class PresupuestoService {
   }
 
   static Future<void> marcarSincronizados(List<String> ids) async {
+    if (kIsWeb) return;
     final db = await _db;
     final batch = db.batch();
     for (final id in ids) {
@@ -150,6 +174,7 @@ class PresupuestoService {
   }
 
   static Future<void> limpiarEliminados() async {
+    if (kIsWeb) return;
     final db = await _db;
     await db.delete('presupuestos_eliminados');
   }
@@ -157,7 +182,7 @@ class PresupuestoService {
   // ── Supabase ──────────────────────────────────────────────────────────────
 
   static Future<void> subirPresupuestos() async {
-    if (!_autenticado) return;
+    if (!_autenticado || kIsWeb) return;
 
     final pendientes = await getNoSincronizados();
     if (pendientes.isNotEmpty) {
@@ -179,7 +204,7 @@ class PresupuestoService {
   }
 
   static Future<void> bajarPresupuestos() async {
-    if (!_autenticado) return;
+    if (!_autenticado || kIsWeb) return;
 
     final res = await _client
         .from('presupuestos')
@@ -206,6 +231,24 @@ class PresupuestoService {
 
   static Future<Map<String, double>> getGastosRealesCategorias(
       int mes, int anio) async {
+    if (kIsWeb) {
+      if (!_autenticado) return {};
+      final res = await _client.from('movimientos')
+          .select('categoria, monto')
+          .eq('usuario_id', _uid)
+          .eq('mes', mes)
+          .eq('anio', anio)
+          .eq('tipo', 'egreso')
+          .neq('categoria', 'TRANSFERENCIA');
+          
+      final map = <String, double>{};
+      for (final row in res as List) {
+        final cat = row['categoria'] as String;
+        final monto = (row['monto'] as num).toDouble();
+        map[cat] = (map[cat] ?? 0) + monto;
+      }
+      return map;
+    }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
       SELECT categoria, SUM(monto) as total
@@ -222,6 +265,24 @@ class PresupuestoService {
 
   static Future<Map<String, double>> getGastosRealesCuentas(
       int mes, int anio) async {
+    if (kIsWeb) {
+      if (!_autenticado) return {};
+      final res = await _client.from('movimientos')
+          .select('cuenta, monto')
+          .eq('usuario_id', _uid)
+          .eq('mes', mes)
+          .eq('anio', anio)
+          .eq('tipo', 'egreso')
+          .neq('categoria', 'TRANSFERENCIA');
+
+      final map = <String, double>{};
+      for (final row in res as List) {
+        final cuenta = row['cuenta'] as String;
+        final monto = (row['monto'] as num).toDouble();
+        map[cuenta] = (map[cuenta] ?? 0) + monto;
+      }
+      return map;
+    }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
       SELECT cuenta, SUM(monto) as total
