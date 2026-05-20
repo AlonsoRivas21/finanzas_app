@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'database_helper.dart';
+import 'supabase_service.dart';
 
 class CatalogoService {
   static final _client = Supabase.instance.client;
@@ -85,6 +86,8 @@ class CatalogoService {
       cloudMap['activa'] = true;
       cloudMap.remove('sincronizado'); // Evita error si la columna no existe en Supabase
       await _client.from('cuentas').insert(cloudMap);
+      // Recalcular saldos en la nube para incluir el nuevo saldo inicial
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
       await DatabaseHelper().insertCuenta(cuenta);
     }
@@ -113,6 +116,8 @@ class CatalogoService {
         await _client.from('saldos_cuentas').update({'cuenta': newNombre})
             .eq('usuario_id', _uid).eq('cuenta', oldNombre);
       }
+      // Recalcular saldos en la nube tras modificar el saldo inicial o el nombre
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
       final db = DatabaseHelper();
       await db.updateCuenta({
