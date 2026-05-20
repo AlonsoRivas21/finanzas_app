@@ -8,10 +8,17 @@ import 'presupuesto_service.dart';
 import 'catalogo_service.dart';
 
 class SupabaseService {
-  static final _client = Supabase.instance.client;
+  static SupabaseClient? get _clientSafe {
+    try {
+      return Supabase.instance.client;
+    } catch (_) {
+      return null;
+    }
+  }
 
-  static User? get usuarioActual => _client.auth.currentUser;
+  static User? get usuarioActual => _clientSafe?.auth.currentUser;
   static bool get estaAutenticado => usuarioActual != null;
+  static SupabaseClient get _client => Supabase.instance.client;
 
   static Future<void> registrar(String email, String password) async {
     final res = await _client.auth.signUp(email: email, password: password);

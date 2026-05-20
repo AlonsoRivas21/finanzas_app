@@ -8,10 +8,13 @@ import 'database_helper.dart';
 import 'supabase_service.dart';
 
 class CatalogoService {
-  static final _client = Supabase.instance.client;
+  static SupabaseClient? get _clientSafe {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+  static SupabaseClient get _client => Supabase.instance.client;
   static const _uuid = Uuid();
-  static String get _uid => _client.auth.currentUser?.id ?? '';
-  static bool get _autenticado => _client.auth.currentUser != null;
+  static String get _uid => _clientSafe?.auth.currentUser?.id ?? '';
+  static bool get _autenticado => _clientSafe?.auth.currentUser != null;
 
   // Auxiliares para conversión segura entre SQLite (int) y Supabase (bool)
   static bool _toBool(dynamic val) {
@@ -89,7 +92,9 @@ class CatalogoService {
       // Recalcular saldos en la nube para incluir el nuevo saldo inicial
       await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
-      await DatabaseHelper().insertCuenta(cuenta);
+      final db = DatabaseHelper();
+      await db.insertCuenta(cuenta);
+      await db.recalibrarSaldosLocales();
     }
   }
 
@@ -132,6 +137,8 @@ class CatalogoService {
   static Future<void> eliminarCuenta(String id) async {
     if (kIsWeb) {
       await _client.from('cuentas').update({'activa': false}).eq('id', id);
+      // Recalcular saldos en la nube para eliminar la cuenta de la tabla saldos_cuentas
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
       await DatabaseHelper().deleteCuenta(id);
     }

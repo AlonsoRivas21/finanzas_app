@@ -36,7 +36,9 @@ class DatabaseHelper {
         comentario TEXT,
         mes INTEGER NOT NULL,
         anio INTEGER NOT NULL DEFAULT ${DateTime.now().year},
-        sincronizado INTEGER NOT NULL DEFAULT 0
+        sincronizado INTEGER NOT NULL DEFAULT 0,
+        cuenta_id TEXT,
+        categoria_id TEXT
       )
     ''');
     await db.execute('''
@@ -89,6 +91,7 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX idx_fecha ON movimientos(fecha DESC)');
     await db.execute('CREATE INDEX idx_mes_anio ON movimientos(mes, anio)');
     await db.execute('CREATE INDEX idx_cuenta ON movimientos(cuenta)');
+    await db.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -155,33 +158,44 @@ class DatabaseHelper {
     }
     if (oldVersion < 6) {
       // Migración para usar IDs como llaves en lugar de nombres
-      await db.execute('ALTER TABLE movimientos ADD COLUMN cuenta_id TEXT');
-      await db.execute('ALTER TABLE movimientos ADD COLUMN categoria_id TEXT');
+      try {
+        await db.execute('ALTER TABLE movimientos ADD COLUMN cuenta_id TEXT');
+      } catch (e) { print('Migración: cuenta_id ya existe o falló: $e'); }
+      
+      try {
+        await db.execute('ALTER TABLE movimientos ADD COLUMN categoria_id TEXT');
+      } catch (e) { print('Migración: categoria_id ya existe o falló: $e'); }
       
       // Vincular datos existentes por nombre
-      await db.execute('''
-        UPDATE movimientos SET 
-          cuenta_id = (SELECT id FROM cuentas WHERE nombre = movimientos.cuenta),
-          categoria_id = (SELECT id FROM categorias WHERE nombre = movimientos.categoria)
-      ''');
+      try {
+        await db.execute('''
+          UPDATE movimientos SET 
+            cuenta_id = (SELECT id FROM cuentas WHERE nombre = movimientos.cuenta),
+            categoria_id = (SELECT id FROM categorias WHERE nombre = movimientos.categoria)
+          WHERE cuenta_id IS NULL OR categoria_id IS NULL
+        ''');
+      } catch (e) { print('Migración: error vinculando IDs: $e'); }
       
-      await db.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_cuenta_id ON movimientos(cuenta_id)');
+      } catch (e) { print('Migración: error creando índice: $e'); }
     }
   }
 
   // ── Saldos cuentas (delta) ────────────────────────────────────────────────
 
   Future<void> aplicarDeltaSaldo(String cuenta, double delta) async {
+    final cuentaNorm = cuenta.toUpperCase();
     final database = await db;
     final rows = await database.query('saldos_cuentas',
-        where: 'cuenta = ?', whereArgs: [cuenta]);
+        where: 'UPPER(cuenta) = ?', whereArgs: [cuentaNorm]);
 
     final saldoActual = rows.isEmpty
         ? 0.0
         : (rows.first['saldo_actual'] as num).toDouble();
 
     await database.insert('saldos_cuentas', {
-      'cuenta':       cuenta,
+      'cuenta':       cuentaNorm,
       'saldo_actual': saldoActual + delta,
       'updated_at':   DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -189,7 +203,13 @@ class DatabaseHelper {
 
   Future<Map<String, double>> getSaldosActualesLocal() async {
     final database = await db;
-    final rows = await database.query('saldos_cuentas');
+    // Usamos UPPER en el JOIN para que no falle si hay diferencias de casing entre tablas
+    final rows = await database.rawQuery('''
+      SELECT s.cuenta, s.saldo_actual 
+      FROM saldos_cuentas s
+      INNER JOIN cuentas c ON UPPER(s.cuenta) = UPPER(c.nombre)
+      WHERE c.activa = 1
+    ''');
     return {
       for (final row in rows)
         row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
@@ -203,19 +223,20 @@ class DatabaseHelper {
     // 1. Obtener saldos iniciales de cuentas activas
     final cuentas = await getCuentas();
     final saldos = <String, double>{
-      for (var c in cuentas) 
-        c['nombre'] as String: (c['saldo_inicial'] as num).toDouble()
+      for (var c in cuentas)
+        (c['nombre'] as String? ?? ''):
+            (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0
     };
 
     // 2. Sumar el neto de movimientos agrupados por cuenta y tipo
     final rows = await database.rawQuery('''
-      SELECT cuenta, tipo, SUM(monto) as total
+      SELECT UPPER(cuenta) as cuenta_norm, tipo, SUM(monto) as total
       FROM movimientos
-      GROUP BY cuenta, tipo
+      GROUP BY cuenta_norm, tipo
     ''');
 
     for (final row in rows) {
-      final cuenta = row['cuenta'] as String;
+      final cuenta = row['cuenta_norm'] as String;
       if (saldos.containsKey(cuenta)) {
         final monto = (row['total'] as num).toDouble();
         final delta = row['tipo'] == 'ingreso' ? monto : -monto;
@@ -258,9 +279,10 @@ class DatabaseHelper {
   Future<void> guardarSaldosDesdeNube(Map<String, double> saldos) async {
     final database = await db;
     final batch = database.batch();
+    batch.delete('saldos_cuentas'); // Limpiar antes de recibir los nuevos de la nube
     for (final entry in saldos.entries) {
       batch.insert('saldos_cuentas', {
-        'cuenta':       entry.key,
+        'cuenta':       entry.key.toUpperCase(),
         'saldo_actual': entry.value,
         'updated_at':   DateTime.now().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -328,6 +350,8 @@ class DatabaseHelper {
     await database.insert('cuentas_eliminadas',
         {'id': id, 'eliminado_at': DateTime.now().toIso8601String()},
         conflictAlgorithm: ConflictAlgorithm.replace);
+    // Recalibrar para limpiar la tabla saldos_cuentas de la cuenta eliminada
+    await recalibrarSaldosLocales();
   }
 
   Future<List<Map<String, dynamic>>> getCuentasNoSincronizadas() async {
@@ -366,6 +390,8 @@ class DatabaseHelper {
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
+    // Recalibrar saldos para que coincidan con el nuevo estado de las cuentas (activas/inactivas)
+    await recalibrarSaldosLocales();
   }
 
   // ── Categorías dinámicas ──────────────────────────────────────────────────
@@ -596,9 +622,11 @@ class DatabaseHelper {
   Future<Map<String, Map<String, double>>> getResumenPorCuenta(int anio) async {
     final database = await db;
     final result = await database.rawQuery('''
-      SELECT cuenta, tipo, SUM(monto) as total
-      FROM movimientos WHERE anio = ?
-      GROUP BY cuenta, tipo
+      SELECT m.cuenta, m.tipo, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN cuentas c ON m.cuenta = c.nombre
+      WHERE m.anio = ? AND c.activa = 1
+      GROUP BY m.cuenta, m.tipo
     ''', [anio]);
     final mapa = <String, Map<String, double>>{};
     for (final row in result) {
@@ -689,6 +717,7 @@ class DatabaseHelper {
     final database = await db;
     await database.delete('movimientos');
     await database.delete('movimientos_eliminados');
-    // NO limpiar saldos_cuentas, cuentas ni categorias
+    // Al limpiar movimientos, también debemos reiniciar la tabla de saldos calculados
+    await database.delete('saldos_cuentas');
   }
 }

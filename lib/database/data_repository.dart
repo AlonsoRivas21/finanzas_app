@@ -11,8 +11,11 @@ class DataRepository {
   factory DataRepository() => _instance;
   DataRepository._internal();
 
-  static final _client = Supabase.instance.client;
-  String get _uid => _client.auth.currentUser?.id ?? '';
+  static SupabaseClient? get _clientSafe {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+  String get _uid => _clientSafe?.auth.currentUser?.id ?? '';
+  static SupabaseClient get _client => Supabase.instance.client;
 
   // ── Movimientos ───────────────────────────────────────────────────────────
 
@@ -220,8 +223,10 @@ class DataRepository {
 
       if ((res as List).isNotEmpty) {
         for (final row in res) {
-          saldos[row['cuenta'] as String] =
-              (row['saldo_actual'] as num).toDouble();
+          final nombre = row['cuenta'] as String;
+          if (saldos.containsKey(nombre)) {
+            saldos[nombre] = (row['saldo_actual'] as num).toDouble();
+          }
         }
         return saldos;
       }
@@ -235,9 +240,11 @@ class DataRepository {
 
     for (final row in movRes as List) {
       final cuenta = row['cuenta'] as String;
-      final monto  = (row['monto'] as num).toDouble();
-      saldos[cuenta] = (saldos[cuenta] ?? 0) +
-          (row['tipo'] == 'ingreso' ? monto : -monto);
+      if (saldos.containsKey(cuenta)) {
+        final monto = (row['monto'] as num).toDouble();
+        saldos[cuenta] = (saldos[cuenta] ?? 0) +
+            (row['tipo'] == 'ingreso' ? monto : -monto);
+      }
     }
     return saldos;
   }

@@ -9,9 +9,12 @@ import 'database_helper.dart';
 import 'supabase_service.dart';
 
 class SaldosService {
-  static final _client = Supabase.instance.client;
-  static String get _uid => _client.auth.currentUser?.id ?? '';
-  static bool get _autenticado => _client.auth.currentUser != null;
+  static SupabaseClient? get _clientSafe {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+  static SupabaseClient get _client => Supabase.instance.client;
+  static String get _uid => _clientSafe?.auth.currentUser?.id ?? '';
+  static bool get _autenticado => _clientSafe?.auth.currentUser != null;
 
   // ── Lectura ───────────────────────────────────────────────────────────────
 
