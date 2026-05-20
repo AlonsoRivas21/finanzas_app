@@ -3,8 +3,11 @@
 // Ahora maneja saldos ACTUALES directamente
 
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import '../database/database_helper.dart';
 import '../database/catalogo_service.dart';
+import '../database/data_repository.dart';
+import '../models/movimiento.dart';
 
 class SaldosScreen extends StatefulWidget {
   const SaldosScreen({super.key});
@@ -50,14 +53,38 @@ class _SaldosScreenState extends State<SaldosScreen> {
 
   Future<void> _guardar() async {
     setState(() => _guardando = true);
-    final db = DatabaseHelper();
+    final repo = DataRepository();
+    final saldosActuales = await DatabaseHelper().getSaldosActualesLocal();
+    final ahora = DateTime.now();
+    const uuid = Uuid();
+
     for (final c in _cuentas) {
       final nombre = c['nombre'] as String;
-      final val = double.tryParse(
+      final nuevoSaldo = double.tryParse(
               _controllers[nombre]?.text.replaceAll(',', '.') ?? '0') ??
           0.0;
-      await db.setSaldoCuenta(nombre, val);
+      
+      final saldoAnterior = saldosActuales[nombre] ?? 0.0;
+      final diferencia = nuevoSaldo - saldoAnterior;
+
+      // Solo creamos un ajuste si la diferencia es significativa
+      if (diferencia.abs() > 0.01) {
+        final ajuste = Movimiento(
+          id: uuid.v4(),
+          fecha: ahora,
+          tipo: diferencia > 0 ? TipoMovimiento.ingreso : TipoMovimiento.egreso,
+          monto: diferencia.abs(),
+          categoriaNombre: 'AJUSTE',
+          cuentaNombre: nombre,
+          comentario: 'Ajuste manual de saldo',
+          mes: ahora.month,
+          anio: ahora.year,
+          sincronizado: false,
+        );
+        await repo.insertMovimiento(ajuste);
+      }
     }
+
     setState(() => _guardando = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

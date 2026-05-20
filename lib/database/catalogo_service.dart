@@ -5,12 +5,16 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'database_helper.dart';
+import 'supabase_service.dart';
 
 class CatalogoService {
-  static final _client = Supabase.instance.client;
+  static SupabaseClient? get _clientSafe {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+  static SupabaseClient get _client => Supabase.instance.client;
   static const _uuid = Uuid();
-  static String get _uid => _client.auth.currentUser?.id ?? '';
-  static bool get _autenticado => _client.auth.currentUser != null;
+  static String get _uid => _clientSafe?.auth.currentUser?.id ?? '';
+  static bool get _autenticado => _clientSafe?.auth.currentUser != null;
 
   // Auxiliares para conversión segura entre SQLite (int) y Supabase (bool)
   static bool _toBool(dynamic val) {
@@ -60,7 +64,7 @@ class CatalogoService {
         .eq('activa', true)
         .order('orden');
 
-    return List<Map<String, dynamic>>.from(res).map(_normCuenta).toList();
+    return (res as List).map((e) => _normCuenta(Map<String, dynamic>.from(e))).toList();
   }
 
   static Future<void> crearCuenta({
@@ -80,9 +84,17 @@ class CatalogoService {
     };
 
     if (kIsWeb) {
-      await _client.from('cuentas').insert({...cuenta, 'usuario_id': _uid, 'activa': true});
+      final cloudMap = Map<String, dynamic>.from(cuenta);
+      cloudMap['usuario_id'] = _uid;
+      cloudMap['activa'] = true;
+      cloudMap.remove('sincronizado'); // Evita error si la columna no existe en Supabase
+      await _client.from('cuentas').insert(cloudMap);
+      // Recalcular saldos en la nube para incluir el nuevo saldo inicial
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
-      await DatabaseHelper().insertCuenta(cuenta);
+      final db = DatabaseHelper();
+      await db.insertCuenta(cuenta);
+      await db.recalibrarSaldosLocales();
     }
   }
 
@@ -109,6 +121,8 @@ class CatalogoService {
         await _client.from('saldos_cuentas').update({'cuenta': newNombre})
             .eq('usuario_id', _uid).eq('cuenta', oldNombre);
       }
+      // Recalcular saldos en la nube tras modificar el saldo inicial o el nombre
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
       final db = DatabaseHelper();
       await db.updateCuenta({
@@ -123,6 +137,8 @@ class CatalogoService {
   static Future<void> eliminarCuenta(String id) async {
     if (kIsWeb) {
       await _client.from('cuentas').update({'activa': false}).eq('id', id);
+      // Recalcular saldos en la nube para eliminar la cuenta de la tabla saldos_cuentas
+      await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
       await DatabaseHelper().deleteCuenta(id);
     }
@@ -174,7 +190,11 @@ class CatalogoService {
     };
 
     if (kIsWeb) {
-      await _client.from('categorias').insert({...cat, 'usuario_id': _uid, 'activa': true});
+      final cloudMap = Map<String, dynamic>.from(cat);
+      cloudMap['usuario_id'] = _uid;
+      cloudMap['activa'] = true;
+      cloudMap.remove('sincronizado'); // Evita error si la columna no existe en Supabase
+      await _client.from('categorias').insert(cloudMap);
     } else {
       await DatabaseHelper().insertCategoria(cat);
     }

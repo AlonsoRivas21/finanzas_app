@@ -5,9 +5,12 @@ import '../models/movimiento.dart';
 import 'saldos_service.dart';
 
 class SaldosCuentasService {
-  static final _client = Supabase.instance.client;
-  static String get _uid => _client.auth.currentUser?.id ?? '';
-  static bool get _autenticado => _client.auth.currentUser != null;
+  static SupabaseClient? get _clientSafe {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+  static SupabaseClient get _client => Supabase.instance.client;
+  static String get _uid => _clientSafe?.auth.currentUser?.id ?? '';
+  static bool get _autenticado => _clientSafe?.auth.currentUser != null;
 
   // ── Operaciones locales (sin internet) ───────────────────────────────────
 
@@ -44,7 +47,7 @@ class SaldosCuentasService {
         .eq('usuario_id', _uid);
 
     for (final row in res as List) {
-      final cuenta = row['cuenta'] as String;
+      final cuenta = (row['cuenta'] as String).toUpperCase();
       final monto  = (row['monto'] as num).toDouble();
       final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
       saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
@@ -65,8 +68,10 @@ class SaldosCuentasService {
           .eq('usuario_id', _uid);
 
       for (final row in res as List) {
-        saldos[row['cuenta'] as String] =
-            (row['saldo_actual'] as num).toDouble();
+        final nombre = (row['cuenta'] as String).toUpperCase();
+        if (saldos.containsKey(nombre)) {
+          saldos[nombre] = (row['saldo_actual'] as num).toDouble();
+        }
       }
     } catch (_) {}
 
