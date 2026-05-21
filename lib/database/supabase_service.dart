@@ -112,8 +112,8 @@ class SupabaseService {
       'fecha':       row['fecha'],
       'tipo':        row['tipo'],
       'monto':       (row['monto'] as num).toDouble(),
-      'categoria':   row['categoria'],
-      'cuenta':      row['cuenta'],
+      'categoria_id': row['categoria_id'],
+      'cuenta_id':    row['cuenta_id'],
       'comentario':  row['comentario'],
       'mes':         row['mes'],
       'anio':        row['anio'] ?? DateTime.parse(row['fecha']).year,
@@ -152,11 +152,12 @@ class SupabaseService {
       // 2. Sumar movimientos desde la nube
       final movRes = await _client
           .from('movimientos')
-          .select('cuenta, tipo, monto')
+          .select('monto, tipo, cuentas(nombre)')
           .eq('usuario_id', uid);
 
       for (final row in movRes as List) {
-        final cuenta = row['cuenta'] as String;
+        final cuenta = row['cuentas']?['nombre'] as String?;
+        if (cuenta == null) continue;
         if (!saldos.containsKey(cuenta)) continue;
         final monto  = (row['monto'] as num).toDouble();
         final delta  = row['tipo'] == 'ingreso' ? monto : -monto;

@@ -116,8 +116,6 @@ class CatalogoService {
           .eq('id', cuenta['id']);
 
       if (oldNombre != null && oldNombre != newNombre) {
-        await _client.from('movimientos').update({'cuenta': newNombre})
-            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
         await _client.from('saldos_cuentas').update({'cuenta': newNombre})
             .eq('usuario_id', _uid).eq('cuenta', oldNombre);
       }

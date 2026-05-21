@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, AppConfig.dbName);
-    return openDatabase(path, version: 6,
+    return openDatabase(path, version: 7,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -31,14 +31,14 @@ class DatabaseHelper {
         fecha TEXT NOT NULL,
         tipo TEXT NOT NULL,
         monto REAL NOT NULL,
-        categoria TEXT NOT NULL,
-        cuenta TEXT NOT NULL,
         comentario TEXT,
         mes INTEGER NOT NULL,
         anio INTEGER NOT NULL DEFAULT ${DateTime.now().year},
         sincronizado INTEGER NOT NULL DEFAULT 0,
-        cuenta_id TEXT,
-        categoria_id TEXT
+        cuenta_id TEXT NOT NULL,
+        categoria_id TEXT NOT NULL,
+        FOREIGN KEY (cuenta_id) REFERENCES cuentas (id),
+        FOREIGN KEY (categoria_id) REFERENCES categorias (id)
       )
     ''');
     await db.execute('''
@@ -90,7 +90,6 @@ class DatabaseHelper {
     ''');
     await db.execute('CREATE INDEX idx_fecha ON movimientos(fecha DESC)');
     await db.execute('CREATE INDEX idx_mes_anio ON movimientos(mes, anio)');
-    await db.execute('CREATE INDEX idx_cuenta ON movimientos(cuenta)');
     await db.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
   }
 
@@ -180,13 +179,65 @@ class DatabaseHelper {
         await db.execute('CREATE INDEX IF NOT EXISTS idx_cuenta_id ON movimientos(cuenta_id)');
       } catch (e) { print('Migración: error creando índice: $e'); }
     }
+
+    if (oldVersion < 7) {
+      // MIGRACIÓN ESTRUCTURAL: Recreación de la tabla movimientos
+      await db.transaction((txn) async {
+        // 1. Crear la tabla nueva con la estructura correcta y Foreign Keys
+        await txn.execute('''
+          CREATE TABLE movimientos_nuevo (
+            id TEXT PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            monto REAL NOT NULL,
+            comentario TEXT,
+            mes INTEGER NOT NULL,
+            anio INTEGER NOT NULL,
+            sincronizado INTEGER NOT NULL DEFAULT 0,
+            cuenta_id TEXT NOT NULL,
+            categoria_id TEXT NOT NULL,
+            FOREIGN KEY (cuenta_id) REFERENCES cuentas (id),
+            FOREIGN KEY (categoria_id) REFERENCES categorias (id)
+          )
+        ''');
+
+        // 2. Migrar los datos haciendo el mapeo de nombres a IDs
+        // Usamos subconsultas con UPPER para asegurar que el match no falle por casing
+        // Si no encuentra el ID, se pone '0' o un valor por defecto para no violar el NOT NULL
+        await txn.execute('''
+          INSERT INTO movimientos_nuevo (
+            id, fecha, tipo, monto, comentario, mes, anio, sincronizado, cuenta_id, categoria_id
+          )
+          SELECT 
+            m.id, m.fecha, m.tipo, m.monto, m.comentario, m.mes, m.anio, m.sincronizado,
+            COALESCE((SELECT id FROM cuentas WHERE UPPER(nombre) = UPPER(m.cuenta) LIMIT 1), 'default_account_id'),
+            COALESCE((SELECT id FROM categorias WHERE UPPER(nombre) = UPPER(m.categoria) LIMIT 1), 'default_category_id')
+          FROM movimientos m
+        ''');
+
+        // 3. Eliminar tabla vieja y renombrar la nueva
+        await txn.execute('DROP TABLE movimientos');
+        await txn.execute('ALTER TABLE movimientos_nuevo RENAME TO movimientos');
+
+        // 4. Recrear índices (importante porque se pierden al dropear la tabla)
+        await txn.execute('CREATE INDEX idx_fecha ON movimientos(fecha DESC)');
+        await txn.execute('CREATE INDEX idx_mes_anio ON movimientos(mes, anio)');
+        await txn.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
+      });
+    }
   }
 
   // ── Saldos cuentas (delta) ────────────────────────────────────────────────
 
-  Future<void> aplicarDeltaSaldo(String cuenta, double delta) async {
-    final cuentaNorm = cuenta.toUpperCase();
+  Future<void> aplicarDeltaSaldoPorId(String cuentaId, double delta) async {
     final database = await db;
+    // Obtener el nombre de la cuenta para la tabla saldos_cuentas
+    final res = await database.query('cuentas', columns: ['nombre'], where: 'id = ?', whereArgs: [cuentaId]);
+    if (res.isEmpty) return;
+    
+    final String cuentaNombre = res.first['nombre'] as String;
+    final cuentaNorm = cuentaNombre.toUpperCase();
+    
     final rows = await database.query('saldos_cuentas',
         where: 'UPPER(cuenta) = ?', whereArgs: [cuentaNorm]);
 
@@ -230,9 +281,10 @@ class DatabaseHelper {
 
     // 2. Sumar el neto de movimientos agrupados por cuenta y tipo
     final rows = await database.rawQuery('''
-      SELECT UPPER(cuenta) as cuenta_norm, tipo, SUM(monto) as total
-      FROM movimientos
-      GROUP BY cuenta_norm, tipo
+      SELECT UPPER(c.nombre) as cuenta_norm, m.tipo, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN cuentas c ON m.cuenta_id = c.id
+      GROUP BY m.cuenta_id, m.tipo
     ''');
 
     for (final row in rows) {
@@ -318,14 +370,8 @@ class DatabaseHelper {
       final oldNombre = existing.first['nombre'] as String;
 
       if (oldNombre != newNombre) {
-        // 2. Propagar el cambio a movimientos y marcar para re-sincronizar
-        // Es vital poner sincronizado = 0 para que la nube se entere del cambio de nombre
-        await database.update('movimientos', {
-          'cuenta': newNombre,
-          'sincronizado': 0 
-        },
-            where: 'cuenta = ?', whereArgs: [oldNombre]);
-
+        // Ya no es necesario propagar el nombre a 'movimientos' porque usamos IDs
+        // Pero sí a la tabla de saldos_cuentas que usa nombres como PK
         await database.update('saldos_cuentas', {'cuenta': newNombre},
             where: 'cuenta = ?', whereArgs: [oldNombre]);
       }
@@ -422,19 +468,8 @@ class DatabaseHelper {
         columns: ['nombre'], where: 'id = ?', whereArgs: [cat['id']]);
 
     if (existing.isNotEmpty) {
-      final oldNombre = existing.first['nombre'] as String;
-      final newNombre = (cat['nombre'] as String).toUpperCase();
-
-      if (oldNombre != newNombre) {
-        // 2. Propagar a movimientos y marcar para re-sincronizar
-        await database.update('movimientos', {
-          'categoria': newNombre,
-          'sincronizado': 0
-        },
-            where: 'categoria = ?', whereArgs: [oldNombre]);
-      }
     }
-
+    // Solo actualizamos la categoría, los movimientos ya están vinculados por ID
     await database.update('categorias', cat,
         where: 'id = ?', whereArgs: [cat['id']]); // Actualiza otros campos de la categoría
     await database.update('categorias', {'sincronizado': 0}, where: 'id = ?', whereArgs: [cat['id']]); // Asegura que la categoría misma se marque como no sincronizada
@@ -494,7 +529,9 @@ class DatabaseHelper {
     await database.insert('movimientos', m.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace);
     final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-    await aplicarDeltaSaldo(m.cuentaNombre, delta);
+    if (m.cuentaId != null) {
+      await aplicarDeltaSaldoPorId(m.cuentaId!, delta);
+    }
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
@@ -507,7 +544,9 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
     for (final m in lista) {
       final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-      await aplicarDeltaSaldo(m.cuentaNombre, delta);
+      if (m.cuentaId != null) {
+        await aplicarDeltaSaldoPorId(m.cuentaId!, delta);
+      }
     }
   }
 
@@ -519,14 +558,18 @@ class DatabaseHelper {
       final anterior = Movimiento.fromMap(rows.first);
       final deltaAnterior = anterior.tipo == TipoMovimiento.ingreso
           ? -anterior.monto : anterior.monto;
-      await aplicarDeltaSaldo(anterior.cuentaNombre, deltaAnterior);
+      if (anterior.cuentaId != null) {
+        await aplicarDeltaSaldoPorId(anterior.cuentaId!, deltaAnterior);
+      }
     }
     await database.update('movimientos', nuevo.toMap(),
         where: 'id = ?', whereArgs: [nuevo.id]);
     await database.update('movimientos', {'sincronizado': 0}, where: 'id = ?', whereArgs: [nuevo.id]); // Marcar como no sincronizado para que se suba
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso
         ? nuevo.monto : -nuevo.monto;
-    await aplicarDeltaSaldo(nuevo.cuentaNombre, deltaNuevo);
+    if (nuevo.cuentaId != null) {
+      await aplicarDeltaSaldoPorId(nuevo.cuentaId!, deltaNuevo);
+    }
   }
 
   Future<void> deleteMovimiento(String id) async {
@@ -536,7 +579,9 @@ class DatabaseHelper {
     if (rows.isNotEmpty) {
       final m = Movimiento.fromMap(rows.first);
       final delta = m.tipo == TipoMovimiento.ingreso ? -m.monto : m.monto;
-      await aplicarDeltaSaldo(m.cuentaNombre, delta);
+      if (m.cuentaId != null) {
+        await aplicarDeltaSaldoPorId(m.cuentaId!, delta);
+      }
     }
     await database.delete('movimientos', where: 'id = ?', whereArgs: [id]);
     await database.insert('movimientos_eliminados',
@@ -568,20 +613,30 @@ class DatabaseHelper {
     final where = <String>[];
     final args  = <dynamic>[];
 
-    if (mes != null)    { where.add('mes = ?');    args.add(mes); }
-    if (anio != null)   { where.add('anio = ?');   args.add(anio); }
-    if (cuenta != null) { where.add('cuenta = ?'); args.add(cuenta); }
-    if (tipo != null)   { where.add('tipo = ?');   args.add(tipo); }
+    if (mes != null)    { where.add('m.mes = ?');    args.add(mes); }
+    if (anio != null)   { where.add('m.anio = ?');   args.add(anio); }
+    if (cuenta != null) { where.add('m.cuenta_id = ?'); args.add(cuenta); }
+    if (tipo != null)   { where.add('m.tipo = ?');   args.add(tipo); }
     if (busqueda != null && busqueda.isNotEmpty) {
-      where.add('(categoria LIKE ? OR comentario LIKE ? OR cuenta LIKE ?)');
+      // Búsqueda más eficiente aprovechando los JOINs
+      where.add('(m.comentario LIKE ? OR categorias.nombre LIKE ? OR cuentas.nombre LIKE ?)');
       final q = '%$busqueda%';
       args.addAll([q, q, q]);
     }
 
-    final rows = await database.query('movimientos',
-        where: where.isEmpty ? null : where.join(' AND '),
-        whereArgs: args.isEmpty ? null : args,
-        orderBy: 'fecha DESC', limit: limit, offset: offset);
+    final whereString = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    
+    final sql = '''
+      SELECT m.*, categorias.nombre AS categoria_nombre, cuentas.nombre AS cuenta_nombre
+      FROM movimientos AS m
+      LEFT JOIN categorias ON m.categoria_id = categorias.id
+      LEFT JOIN cuentas ON m.cuenta_id = cuentas.id
+      $whereString
+      ORDER BY m.fecha DESC
+      LIMIT $limit OFFSET $offset
+    ''';
+
+    final rows = await database.rawQuery(sql, args);
     return rows.map(Movimiento.fromMap).toList();
   }
 
@@ -595,13 +650,14 @@ class DatabaseHelper {
   Future<Map<String, double>> getResumenMes(int mes, int anio) async {
     final database = await db;
     final result = await database.rawQuery('''
-      SELECT tipo, SUM(monto) as total
-      FROM movimientos 
-      WHERE mes = ? 
-        AND anio = ?
+      SELECT m.tipo, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN categorias c ON m.categoria_id = c.id
+      WHERE m.mes = ? 
+        AND m.anio = ?
         AND (
-          (tipo = 'egreso' AND UPPER(TRIM(categoria)) != 'TRANSFERENCIA')
-          OR (tipo = 'ingreso' AND UPPER(TRIM(categoria)) = 'INGRESOS')
+          (m.tipo = 'egreso' AND UPPER(TRIM(c.nombre)) != 'TRANSFERENCIA')
+          OR (m.tipo = 'ingreso' AND UPPER(TRIM(c.nombre)) = 'INGRESOS')
         )
       GROUP BY tipo
     ''', [mes, anio]);
@@ -622,11 +678,11 @@ class DatabaseHelper {
   Future<Map<String, Map<String, double>>> getResumenPorCuenta(int anio) async {
     final database = await db;
     final result = await database.rawQuery('''
-      SELECT m.cuenta, m.tipo, SUM(m.monto) as total
+      SELECT c.nombre as cuenta, m.tipo, SUM(m.monto) as total
       FROM movimientos m
-      INNER JOIN cuentas c ON m.cuenta = c.nombre
+      INNER JOIN cuentas c ON m.cuenta_id = c.id
       WHERE m.anio = ? AND c.activa = 1
-      GROUP BY m.cuenta, m.tipo
+      GROUP BY c.nombre, m.tipo
     ''', [anio]);
     final mapa = <String, Map<String, double>>{};
     for (final row in result) {
@@ -647,10 +703,11 @@ class DatabaseHelper {
       int mes, int anio) async {
     final database = await db;
     return database.rawQuery('''
-      SELECT categoria, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso'
-      GROUP BY categoria ORDER BY total DESC
+      SELECT c.nombre as categoria, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN categorias c ON m.categoria_id = c.id
+      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso'
+      GROUP BY c.nombre ORDER BY total DESC
     ''', [mes, anio]);
   }
 
@@ -660,15 +717,16 @@ class DatabaseHelper {
     final result = await database.rawQuery('''
       SELECT
         CASE
-          WHEN CAST(strftime('%d', fecha) AS INTEGER) <= 7  THEN 0
-          WHEN CAST(strftime('%d', fecha) AS INTEGER) <= 14 THEN 1
-          WHEN CAST(strftime('%d', fecha) AS INTEGER) <= 21 THEN 2
+          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 7  THEN 0
+          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 14 THEN 1
+          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 21 THEN 2
           ELSE 3
         END as semana,
-        tipo, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ?
-        AND categoria NOT IN ('TRANSFERENCIA', 'SALDO')
+        m.tipo, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN categorias c ON m.categoria_id = c.id
+      WHERE m.mes = ? AND m.anio = ?
+        AND c.nombre NOT IN ('TRANSFERENCIA', 'SALDO')
       GROUP BY semana, tipo ORDER BY semana
     ''', [mes, anio]);
 

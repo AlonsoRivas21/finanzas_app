@@ -26,6 +26,13 @@ class ExcelImportService {
     final movimientos = <Movimiento>[];
     int ignorados = 0;
 
+    // Obtener catálogos para mapear nombres a IDs
+    final cuentasList = await CatalogoService.getCuentas();
+    final categoriasList = await CatalogoService.getCategorias();
+    
+    final mapaCuentas = {for (var c in cuentasList) (c['nombre'] as String).toUpperCase(): c['id'] as String};
+    final mapaCategorias = {for (var c in categoriasList) (c['nombre'] as String).toUpperCase(): c['id'] as String};
+
     // Fila 0: encabezados de cuentas
     // Fila 1: fórmulas de saldos
     // Fila 2: encabezados (FECHA, MOVIMIENTO, MONTO...)
@@ -52,13 +59,16 @@ class ExcelImportService {
             ? TipoMovimiento.ingreso
             : TipoMovimiento.egreso;
 
+        final catId = mapaCategorias[categoriaStr.toUpperCase()] ?? '';
+        final cueId = mapaCuentas[cuentaStr.toUpperCase()] ?? '';
+
         movimientos.add(Movimiento(
           id: _uuid.v4(),
           fecha: fecha,
           tipo: tipo,
           monto: monto,
-          categoriaNombre: categoriaStr.toUpperCase(),
-          cuentaNombre: cuentaStr.toUpperCase(),
+          categoriaId: catId,
+          cuentaId: cueId,
           comentario: comentario,
           mes: mes,
           sincronizado: false,

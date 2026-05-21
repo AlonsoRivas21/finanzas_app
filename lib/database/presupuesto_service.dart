@@ -234,16 +234,16 @@ class PresupuestoService {
     if (kIsWeb) {
       if (!_autenticado) return {};
       final res = await _client.from('movimientos')
-          .select('categoria, monto')
+          .select('monto, categorias(nombre)')
           .eq('usuario_id', _uid)
           .eq('mes', mes)
           .eq('anio', anio)
-          .eq('tipo', 'egreso')
-          .neq('categoria', 'TRANSFERENCIA');
+          .eq('tipo', 'egreso');
           
       final map = <String, double>{};
       for (final row in res as List) {
-        final cat = row['categoria'] as String;
+        final cat = (row['categorias'] as Map)['nombre'] as String;
+        if (cat == 'TRANSFERENCIA') continue;
         final monto = (row['monto'] as num).toDouble();
         map[cat] = (map[cat] ?? 0) + monto;
       }
@@ -251,10 +251,11 @@ class PresupuestoService {
     }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
-      SELECT categoria, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
-      GROUP BY categoria
+      SELECT c.nombre as categoria, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN categorias c ON m.categoria_id = c.id
+      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso' AND c.nombre NOT IN ('TRANSFERENCIA')
+      GROUP BY c.nombre
     ''', [mes, anio]);
 
     return {
@@ -268,16 +269,15 @@ class PresupuestoService {
     if (kIsWeb) {
       if (!_autenticado) return {};
       final res = await _client.from('movimientos')
-          .select('cuenta, monto')
+          .select('monto, cuentas(nombre)')
           .eq('usuario_id', _uid)
           .eq('mes', mes)
           .eq('anio', anio)
-          .eq('tipo', 'egreso')
-          .neq('categoria', 'TRANSFERENCIA');
+          .eq('tipo', 'egreso');
 
       final map = <String, double>{};
       for (final row in res as List) {
-        final cuenta = row['cuenta'] as String;
+        final cuenta = (row['cuentas'] as Map)['nombre'] as String;
         final monto = (row['monto'] as num).toDouble();
         map[cuenta] = (map[cuenta] ?? 0) + monto;
       }
@@ -285,10 +285,11 @@ class PresupuestoService {
     }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
-      SELECT cuenta, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
-      GROUP BY cuenta
+      SELECT c.nombre as cuenta, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN cuentas c ON m.cuenta_id = c.id
+      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso' AND c.nombre NOT IN ('TRANSFERENCIA')
+      GROUP BY c.nombre
     ''', [mes, anio]);
 
     return {

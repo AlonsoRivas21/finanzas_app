@@ -31,7 +31,13 @@ class DataRepository {
         limit: limit, offset: offset,
       );
     }
-    var query = _client.from('movimientos').select().eq('usuario_id', _uid);
+    // En Web (Supabase), pedimos explícitamente los nombres de las tablas relacionadas
+    var query = _client.from('movimientos').select('''
+      *,
+      categorias(nombre),
+      cuentas(nombre)
+    ''').eq('usuario_id', _uid);
+
     if (mes != null)    query = query.eq('mes', mes);
     if (anio != null)   query = query.eq('anio', anio);
     if (cuenta != null) query = query.eq('cuenta', cuenta);
@@ -43,10 +49,8 @@ class DataRepository {
     if (busqueda != null && busqueda.isNotEmpty) {
       final q = busqueda.toLowerCase();
       lista = lista.where((m) =>
-
-        m.categoriaNombre.toLowerCase().contains(q) ||
-        m.cuentaNombre.toLowerCase().contains(q) ||
-
+        m.displayCategoria.toLowerCase().contains(q) ||
+        m.displayCuenta.toLowerCase().contains(q) ||
         (m.comentario?.toLowerCase().contains(q) ?? false)
       ).toList();
     }
@@ -61,7 +65,9 @@ class DataRepository {
     await _client.from('movimientos').upsert(_toRow(m));
     // Aplicar delta: sumar el monto al saldo de la cuenta
     final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-    await _aplicarDeltaSaldo(m.cuenta, delta);
+    if (m.cuentaId != null) {
+      await _aplicarDeltaSaldo(m.cuentaId!, delta);
+    }
   }
 
   Future<void> insertMovimientos(List<Movimiento> lista) async {
@@ -73,7 +79,9 @@ class DataRepository {
     // Aplicar delta por cada movimiento
     for (final m in lista) {
       final delta = m.tipo == TipoMovimiento.ingreso ? m.monto : -m.monto;
-      await _aplicarDeltaSaldo(m.cuenta, delta);
+      if (m.cuentaId != null) {
+        await _aplicarDeltaSaldo(m.cuentaId!, delta);
+      }
     }
   }
 
@@ -85,7 +93,7 @@ class DataRepository {
     // Obtener el movimiento anterior para calcular la diferencia
     final anteriorRes = await _client
         .from('movimientos')
-        .select('tipo, monto, cuenta')
+        .select('tipo, monto, cuenta_id')
         .eq('id', nuevo.id)
         .maybeSingle();
 
@@ -96,11 +104,13 @@ class DataRepository {
       final deltaAnterior = anteriorRes['tipo'] == 'ingreso'
           ? -(anteriorRes['monto'] as num).toDouble()
           : (anteriorRes['monto'] as num).toDouble();
-      await _aplicarDeltaSaldo(anteriorRes['cuenta'] as String, deltaAnterior);
+      await _aplicarDeltaSaldo(anteriorRes['cuenta_id'] as String, deltaAnterior);
     }
     // Aplicar el efecto del movimiento nuevo
     final deltaNuevo = nuevo.tipo == TipoMovimiento.ingreso ? nuevo.monto : -nuevo.monto;
-    await _aplicarDeltaSaldo(nuevo.cuenta, deltaNuevo);
+    if (nuevo.cuentaId != null) {
+      await _aplicarDeltaSaldo(nuevo.cuentaId!, deltaNuevo);
+    }
   }
 
   Future<void> deleteMovimiento(String id) async {
@@ -126,14 +136,14 @@ class DataRepository {
   Future<void> _revertirMovimientoEnSupabase(String id) async {
     final res = await _client
         .from('movimientos')
-        .select('tipo, monto, cuenta')
+        .select('tipo, monto, cuenta_id')
         .eq('id', id)
         .maybeSingle();
     if (res == null) return;
     final delta = res['tipo'] == 'ingreso'
         ? -(res['monto'] as num).toDouble()
         : (res['monto'] as num).toDouble();
-    await _aplicarDeltaSaldo(res['cuenta'] as String, delta);
+    await _aplicarDeltaSaldo(res['cuenta_id'] as String, delta);
   }
 
   /// Aplica un delta al saldo_actual de una cuenta en saldos_cuentas
@@ -187,14 +197,14 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getResumenMes(mes, anio);
 
     final res = await _client.from('movimientos')
-        .select('tipo, monto, categoria')
+        .select('tipo, monto, categorias(nombre)')
         .eq('usuario_id', _uid)
         .eq('mes', mes)
         .eq('anio', anio);
 
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
-      final cat = (row['categoria'] as String).toUpperCase().trim();
+      final cat = (row['categorias']['nombre'] as String).toUpperCase().trim();
       final tipo = row['tipo'] as String;
       final monto = (row['monto'] as num).toDouble();
 
@@ -235,11 +245,11 @@ class DataRepository {
     // Fallback: calcular desde movimientos si saldos_cuentas está vacío
     final movRes = await _client
         .from('movimientos')
-        .select('cuenta, tipo, monto')
+        .select('tipo, monto, cuentas(nombre)')
         .eq('usuario_id', _uid);
 
     for (final row in movRes as List) {
-      final cuenta = row['cuenta'] as String;
+      final cuenta = row['cuentas']?['nombre'] ?? 'Sin cuenta';
       if (saldos.containsKey(cuenta)) {
         final monto = (row['monto'] as num).toDouble();
         saldos[cuenta] = (saldos[cuenta] ?? 0) +
@@ -254,7 +264,7 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getGastosPorCategoria(mes, anio);
 
     final res = await _client.from('movimientos')
-        .select('categoria, monto')
+        .select('monto, categorias(nombre)')
         .eq('usuario_id', _uid)
         .eq('mes', mes)
         .eq('anio', anio)
@@ -262,7 +272,7 @@ class DataRepository {
 
     final mapa = <String, double>{};
     for (final row in res as List) {
-      final cat = row['categoria'] as String;
+      final cat = row['categorias']?['nombre'] ?? 'Sin categoría';
       mapa[cat] = (mapa[cat] ?? 0) + (row['monto'] as num).toDouble();
     }
     return mapa.entries
@@ -277,7 +287,7 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getResumenPorSemana(mes, anio);
 
     final res = await _client.from('movimientos')
-        .select('fecha, tipo, monto, categoria')
+        .select('fecha, tipo, monto, categorias(nombre)')
         .eq('usuario_id', _uid)
         .eq('mes', mes)
         .eq('anio', anio);
@@ -286,7 +296,7 @@ class DataRepository {
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
 
     for (final row in res as List) {
-      final cat = row['categoria'] as String;
+      final cat = row['categorias']?['nombre'] ?? '';
       if (cat == 'TRANSFERENCIA') continue;
       final dia = int.parse((row['fecha'] as String).substring(8, 10));
       final s   = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
@@ -307,13 +317,13 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getResumenPorCuenta(anio);
 
     final res = await _client.from('movimientos')
-        .select('cuenta, tipo, monto')
+        .select('monto, tipo, cuentas(nombre)')
         .eq('usuario_id', _uid)
         .eq('anio', anio);
 
     final mapa = <String, Map<String, double>>{};
     for (final row in res as List) {
-      final cuenta = row['cuenta'] as String;
+      final cuenta = row['cuentas']?['nombre'] ?? 'Sin cuenta';
       final tipo   = row['tipo'] as String;
       final total  = (row['monto'] as num).toDouble();
       mapa.putIfAbsent(cuenta, () => {'ingresos': 0.0, 'egresos': 0.0});
@@ -348,8 +358,10 @@ class DataRepository {
     'fecha':       row['fecha'],
     'tipo':        row['tipo'],
     'monto':       (row['monto'] as num).toDouble(),
-    'categoria':   row['categoria'],
-    'cuenta':      row['cuenta'],
+      'categoria_id': row['categoria_id'],
+      'cuenta_id':    row['cuenta_id'],
+      'categoria_nombre': row['categorias']?['nombre'],
+      'cuenta_nombre': row['cuentas']?['nombre'],
     'comentario':  row['comentario'],
     'mes':         row['mes'],
     'anio':        row['anio'] ?? DateTime.parse(row['fecha']).year,
