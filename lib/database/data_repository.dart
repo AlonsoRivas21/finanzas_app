@@ -210,15 +210,15 @@ class DataRepository {
 
     double ingresos = 0, egresos = 0;
     for (final row in res as List) {
-      final cat = (row['categorias']['nombre'] as String).toUpperCase().trim();
+      // Manejo seguro de nulos si la categoría no existe
+      final cat = (row['categorias']?['nombre'] as String? ?? '').toUpperCase().trim();
       final tipo = row['tipo'] as String;
       final monto = (row['monto'] as num).toDouble();
 
-      if (tipo == 'ingreso' && cat == 'INGRESOS') {
-        ingresos += monto;
-      } else if (tipo == 'egreso' && cat != 'TRANSFERENCIA') {
-        egresos += monto;
-      }
+      // Lógica unificada: excluir transferencias y sumar por tipo
+      if (cat == 'TRANSFERENCIA') continue;
+      if (tipo == 'ingreso' && cat == 'INGRESOS') ingresos += monto;
+      if (tipo == 'egreso') egresos += monto;
     }
     return {'ingresos': ingresos, 'egresos': egresos};
   }

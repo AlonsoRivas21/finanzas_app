@@ -730,28 +730,46 @@ class DatabaseHelper {
   }
 
   Future<Map<String, double>> getResumenMes(int mes, int anio) async {
-    final database = await db;
-    final result = await database.rawQuery('''
-      SELECT m.tipo, SUM(m.monto) as total
-      FROM movimientos m
-      INNER JOIN categorias c ON m.categoria_id = c.id
-      WHERE m.mes = ? 
-        AND m.anio = ?
-        AND (
-          (m.tipo = 'egreso' AND UPPER(TRIM(c.nombre)) != 'TRANSFERENCIA')
-          OR (m.tipo = 'ingreso' AND UPPER(TRIM(c.nombre)) = 'INGRESOS')
-        )
-      GROUP BY tipo
-    ''', [mes, anio]);
-    double ingresos = 0, egresos = 0;
-    for (final row in result) {
-      if (row['tipo'] == 'ingreso') {
-        ingresos = (row['total'] as num).toDouble();
-      } else {
-        egresos = (row['total'] as num).toDouble();
-      }
+  final database = await db;
+  
+  final result = await database.rawQuery('''
+    SELECT LOWER(m.tipo) as tipo, COALESCE(SUM(m.monto), 0) as total
+    FROM movimientos m
+    LEFT JOIN categorias c ON m.categoria_id = c.id
+    WHERE CAST(m.mes AS INTEGER) = CAST(? AS INTEGER)
+      AND CAST(m.anio AS INTEGER) = CAST(? AS INTEGER)
+      AND (c.nombre IS NULL OR UPPER(TRIM(c.nombre)) != 'TRANSFERENCIA')
+      AND (LOWER(m.tipo) != 'ingreso' OR UPPER(TRIM(c.nombre)) = 'INGRESOS')
+    GROUP BY m.tipo
+  ''', [mes, anio]);
+
+  // 1. Inicializamos los valores por defecto por si el resultado viene vacío
+  double ingresos = 0.0;
+  double egresos = 0.0;
+
+  // 2. Iteramos de forma segura sobre las filas devueltas
+  for (var row in result) {
+    final tipo = row['tipo'] as String?;
+    final categoriaNombre = row['categoria_nombre'] as String? ?? 'INGRESOS';
+    // El truco de oro: Casteamos primero a 'num' (que acepta int y double) 
+    // y luego lo convertimos forzosamente a double.
+    final total = (row['total'] as num?)?.toDouble() ?? 0.0;
+
+    if (tipo == 'ingreso' && categoriaNombre == 'INGRESOS') { // Asegúrate de que coincida con el texto exacto que guardas (ej. 'ingreso')
+      ingresos = total;
+    } else if (tipo == 'egreso') { // Asegúrate de que coincida con el texto exacto que guardas (ej. 'gasto' o 'egreso')
+      egresos = total;
     }
-    return {'ingresos': ingresos, 'egresos': egresos};
+  }
+
+  // 3. Calculamos el balance neto
+  double balance = ingresos - egresos;
+
+  return {
+    'ingresos': ingresos,
+    'egresos': egresos,
+    'balance': balance,
+  };
   }
 
   Future<Map<String, double>> getSaldosPorCuentaLocal() async =>
@@ -760,16 +778,16 @@ class DatabaseHelper {
   Future<Map<String, Map<String, double>>> getResumenPorCuenta(int anio) async {
     final database = await db;
     final result = await database.rawQuery('''
-      SELECT c.nombre as cuenta, m.tipo, SUM(m.monto) as total
+      SELECT COALESCE(c.nombre, 'Sin cuenta') as cuenta, m.tipo, SUM(m.monto) as total
       FROM movimientos m
-      INNER JOIN cuentas c ON m.cuenta_id = c.id
-      WHERE m.anio = ? AND c.activa = 1
-      GROUP BY c.nombre, m.tipo
+      LEFT JOIN cuentas c ON m.cuenta_id = c.id
+      WHERE m.anio = ? AND (c.activa IS NULL OR c.activa = 1)
+      GROUP BY cuenta, m.tipo
     ''', [anio]);
     final mapa = <String, Map<String, double>>{};
     for (final row in result) {
-      final cuenta = row['cuenta'] as String;
-      final tipo   = row['tipo'] as String;
+      final cuenta = row['cuenta'] as String? ?? 'Sin cuenta';
+      final tipo   = (row['tipo'] as String).toLowerCase();
       final total  = (row['total'] as num).toDouble();
       mapa.putIfAbsent(cuenta, () => {'ingresos': 0.0, 'egresos': 0.0});
       if (tipo == 'ingreso') {
@@ -785,11 +803,11 @@ class DatabaseHelper {
       int mes, int anio) async {
     final database = await db;
     return database.rawQuery('''
-      SELECT c.nombre as categoria, SUM(m.monto) as total
+      SELECT COALESCE(c.nombre, 'Sin categoría') as categoria, SUM(m.monto) as total
       FROM movimientos m
-      INNER JOIN categorias c ON m.categoria_id = c.id
+      LEFT JOIN categorias c ON m.categoria_id = c.id
       WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso'
-      GROUP BY c.nombre ORDER BY total DESC
+      GROUP BY categoria ORDER BY total DESC
     ''', [mes, anio]);
   }
 
@@ -803,20 +821,21 @@ class DatabaseHelper {
           WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 14 THEN 1
           WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 21 THEN 2
           ELSE 3
-        END as semana,
-        m.tipo, SUM(m.monto) as total
+        END as num_semana,
+        m.tipo, SUM(m.monto) as total,
+        COALESCE(c.nombre, '') as cat_nombre
       FROM movimientos m
-      INNER JOIN categorias c ON m.categoria_id = c.id
+      LEFT JOIN categorias c ON m.categoria_id = c.id
       WHERE m.mes = ? AND m.anio = ?
-        AND c.nombre NOT IN ('TRANSFERENCIA', 'SALDO')
-      GROUP BY semana, tipo ORDER BY semana
+        AND (c.nombre IS NULL OR UPPER(TRIM(c.nombre)) NOT IN ('TRANSFERENCIA', 'SALDO'))
+      GROUP BY num_semana, m.tipo ORDER BY num_semana
     ''', [mes, anio]);
 
     final semanas = List.generate(4, (i) =>
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
     for (final row in result) {
-      final s     = row['semana'] as int;
-      final tipo  = row['tipo'] as String;
+      final s     = row['num_semana'] as int;
+      final tipo  = (row['tipo'] as String).toLowerCase();
       final total = (row['total'] as num).toDouble();
       if (tipo == 'ingreso') {
         semanas[s]['ingresos'] = total;
