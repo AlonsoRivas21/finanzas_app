@@ -10,6 +10,7 @@ class PresupuestoModel {
   final String id;
   final String tipo; // 'categoria' o 'cuenta'
   final String? categoriaId; // UUID de la categoría o cuenta
+  final String? cuentaId; // UUID de la cuenta
   final double limite;
   final int mes;
   final int anio;
@@ -19,7 +20,8 @@ class PresupuestoModel {
   PresupuestoModel({
     required this.id,
     required this.tipo,
-    this.categoriaId, // This can be either a category ID or an account ID based on 'tipo'
+    this.categoriaId,
+    this.cuentaId,
     required this.limite,
     required this.mes,
     required this.anio,
@@ -29,27 +31,30 @@ class PresupuestoModel {
 
   factory PresupuestoModel.fromMap(Map<String, dynamic> map) {
     String? displayNombre;
-    // Try to get name from joined 'categorias' table (Supabase or SQLite JOIN)
-    if (map['categorias'] != null && map['categorias'] is Map) {
-      displayNombre = map['categorias']['nombre']?.toString();
-    } else if (map['nombre_display'] != null && map['tipo'] == 'categoria') { // From SQLite JOIN
-      displayNombre = map['nombre_display']?.toString();
-    }
+    final tipo = map['tipo']?.toString() ?? 'categoria';
 
-    // If not found and type is 'cuenta', try from joined 'cuentas' table
-    if (displayNombre == null && map['tipo'] == 'cuenta') {
+    // Prioridad por tipo para obtener el nombre correcto
+    if (tipo == 'categoria') {
+      if (map['categorias'] != null && map['categorias'] is Map) {
+        displayNombre = map['categorias']['nombre']?.toString();
+      } else if (map['nombre_display'] != null) {
+        displayNombre = map['nombre_display']?.toString();
+      }
+    } else if (tipo == 'cuenta') {
       if (map['cuentas'] != null && map['cuentas'] is Map) {
         displayNombre = map['cuentas']['nombre']?.toString();
-      } else if (map['nombre_display'] != null) { // From SQLite JOIN
+      } else if (map['nombre_display'] != null) {
         displayNombre = map['nombre_display']?.toString();
       }
     }
+
     displayNombre ??= 'Sin nombre'; // Fallback
 
     return PresupuestoModel(
-      id:           map['id']?.toString() ?? '',
-      tipo:         map['tipo']?.toString() ?? 'categoria', // Default to 'categoria' if null
-      categoriaId:  map['categoria_id']?.toString(),
+      id:          map['id']?.toString() ?? '',
+      tipo:        tipo,
+      categoriaId: map['categoria_id']?.toString(),
+      cuentaId:    map['cuenta_id']?.toString(),
       limite:       (map['limite'] as num? ?? 0.0).toDouble(),
       mes:          map['mes'] as int? ?? 0,
       anio:         map['anio'] as int? ?? 0,
@@ -62,6 +67,7 @@ class PresupuestoModel {
     'id':           id,
     'tipo':         tipo,
     'categoria_id': categoriaId,
+    'cuenta_id':    cuentaId,
     'limite':     limite,
     'mes':          mes,
     'anio':         anio,
@@ -73,6 +79,7 @@ class PresupuestoModel {
     'usuario_id': userId,
     'tipo':     tipo,
     'categoria_id': categoriaId,
+    'cuenta_id':    cuentaId,
     'limite':     limite,
     'mes':        mes,
     'anio':       anio,
@@ -106,15 +113,15 @@ class PresupuestoService {
     final db = await _db;
     final rows = await db.rawQuery('''
       SELECT
-        p.id, p.tipo, p.categoria_id, p.limite, p.mes, p.anio, p.sincronizado,
+        p.id, p.tipo, p.categoria_id, p.cuenta_id, p.limite, p.mes, p.anio, p.sincronizado,
         CASE
           WHEN p.tipo = 'categoria' THEN c.nombre
           WHEN p.tipo = 'cuenta' THEN cu.nombre
           ELSE NULL
         END AS nombre_display
       FROM presupuestos AS p
-      LEFT JOIN categorias AS c ON p.categoria_id = c.id AND p.tipo = 'categoria'
-      LEFT JOIN cuentas AS cu ON p.categoria_id = cu.id AND p.tipo = 'cuenta'
+      LEFT JOIN categorias AS c ON p.categoria_id = c.id
+      LEFT JOIN cuentas AS cu ON p.cuenta_id = cu.id
       WHERE p.mes = ? AND p.anio = ?
       ORDER BY p.tipo
     ''', [mes, anio]);
@@ -308,6 +315,7 @@ class PresupuestoService {
   static PresupuestoModel crear({
     required String tipo,
     String? categoriaId,
+    String? cuentaId,
     required double limite,
     required int mes,
     required int anio, String? id,
@@ -315,7 +323,8 @@ class PresupuestoService {
     return PresupuestoModel(
       id:     id ?? _uuid.v4(),
       tipo:   tipo,
-      categoriaId: categoriaId,
+      categoriaId: tipo == 'categoria' ? categoriaId : null,
+      cuentaId:    tipo == 'cuenta' ? (cuentaId ?? categoriaId) : null,
       limite: limite,
       mes:    mes,
       anio:   anio,
@@ -329,6 +338,7 @@ extension _PresupuestoModelCopyWith on PresupuestoModel {
     String? id,
     String? tipo,
     String? categoriaId,
+    String? cuentaId,
     double? limite,
     int? mes,
     int? anio,
@@ -339,6 +349,7 @@ extension _PresupuestoModelCopyWith on PresupuestoModel {
       id:           id ?? this.id,
       tipo:         tipo ?? this.tipo,
       categoriaId:  categoriaId ?? this.categoriaId,
+      cuentaId:     cuentaId ?? this.cuentaId,
       limite:       limite ?? this.limite,
       mes:          mes ?? this.mes,
       anio:         anio ?? this.anio,

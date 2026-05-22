@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, AppConfig.dbName);
-    return openDatabase(path, version: 9,
+    return openDatabase(path, version: 10,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -93,7 +93,8 @@ class DatabaseHelper {
       CREATE TABLE presupuestos (
         id TEXT PRIMARY KEY,
         tipo TEXT NOT NULL,
-        categoria_id TEXT NOT NULL,
+        categoria_id TEXT,
+        cuenta_id TEXT,
         limite REAL NOT NULL,
         mes INTEGER NOT NULL,
         anio INTEGER NOT NULL,
@@ -321,6 +322,38 @@ class DatabaseHelper {
             eliminado_at TEXT NOT NULL
           )
         ''');
+      });
+    }
+
+    if (oldVersion < 10) {
+      // MIGRACIÓN: Soporte para cuenta_id en presupuestos y categoria_id opcional
+      await db.transaction((txn) async {
+        await txn.execute('''
+          CREATE TABLE presupuestos_nuevo (
+            id TEXT PRIMARY KEY,
+            tipo TEXT NOT NULL,
+            categoria_id TEXT,
+            cuenta_id TEXT,
+            limite REAL NOT NULL,
+            mes INTEGER NOT NULL,
+            anio INTEGER NOT NULL,
+            sincronizado INTEGER NOT NULL DEFAULT 0
+          )
+        ''');
+
+        // Migrar datos existentes mapeando el ID genérico a la columna correcta
+        await txn.execute('''
+          INSERT INTO presupuestos_nuevo (id, tipo, categoria_id, cuenta_id, limite, mes, anio, sincronizado)
+          SELECT 
+            id, tipo,
+            CASE WHEN tipo = 'categoria' THEN categoria_id ELSE NULL END,
+            CASE WHEN tipo = 'cuenta' THEN categoria_id ELSE NULL END,
+            limite, mes, anio, sincronizado
+          FROM presupuestos
+        ''');
+
+        await txn.execute('DROP TABLE presupuestos');
+        await txn.execute('ALTER TABLE presupuestos_nuevo RENAME TO presupuestos');
       });
     }
   }
