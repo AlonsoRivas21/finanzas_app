@@ -41,7 +41,7 @@ class DataRepository {
 
     if (mes != null)    query = query.eq('mes', mes);
     if (anio != null)   query = query.eq('anio', anio);
-    if (cuenta != null) query = query.eq('cuenta', cuenta);
+    if (cuenta != null) query = query.eq('cuenta_id', cuenta);
     if (tipo != null)   query = query.eq('tipo', tipo);
 
     final response = await query.order('fecha', ascending: false).limit(limit);
@@ -149,6 +149,7 @@ class DataRepository {
 
   /// Aplica un delta al saldo_actual de una cuenta en saldos_cuentas
   Future<void> _aplicarDeltaSaldo(String cuentaId, double delta) async {
+    if (_uid.isEmpty) return;
     try {
       // Leer saldo actual
       final res = await _client
@@ -174,7 +175,10 @@ class DataRepository {
         'saldo_actual': saldoActual + delta,
         'updated_at':   DateTime.now().toIso8601String(),
       }, onConflict: 'usuario_id,cuenta_id');
-    } catch (_) {}
+    } catch (e) {
+      print('Error en _aplicarDeltaSaldo Supabase: $e');
+      rethrow;
+    }
   }
 
   Future<int> countMovimientos() async {

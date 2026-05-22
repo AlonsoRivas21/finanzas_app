@@ -358,6 +358,15 @@ class DatabaseHelper {
     };
   }
 
+  Future<Map<String, double>> getSaldosActualesPorId() async {
+    final database = await db;
+    final rows = await database.query('saldos_cuentas');
+    return {
+      for (final row in rows)
+        row['cuenta_id'] as String: (row['saldo_actual'] as num).toDouble()
+    };
+  }
+
   /// Recalcula los saldos de todas las cuentas desde cero: Saldo Inicial + Movimientos
   Future<void> recalibrarSaldosLocales() async {
     final database = await db;

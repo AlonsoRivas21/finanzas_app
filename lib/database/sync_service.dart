@@ -3,6 +3,7 @@ import 'database_helper.dart';
 import 'catalogo_service.dart';
 import 'presupuesto_service.dart';
 import '../models/movimiento.dart';
+import 'supabase_service.dart';
 
 class SyncService {
   static final _supabase = Supabase.instance.client;
@@ -45,6 +46,10 @@ class SyncService {
 
       // Sincroniza Movimientos.
       await _pushMovimientos(uid);
+
+      // 4. RECALCULAR SALDOS EN SUPABASE:
+      // Después de subir movimientos, forzamos que la tabla saldos_cuentas en la nube se actualice.
+      await SupabaseService.recalcularSaldosEnSupabase(uid);
     } catch (e) {
       print('SyncService Error durante Push: $e');
     }
@@ -63,7 +68,7 @@ class SyncService {
       }).toList();
 
       // Upsert basado en el UUID (id). Si el registro existe, lo actualiza; si no, lo crea.
-      await _supabase.from('movimientos').upsert(datos);
+      await _supabase.from('movimientos').upsert(datos, onConflict: 'id');
 
       // Marcar en SQLite como sincronizados
       await _dbHelper.marcarSincronizados(pendientes.map((m) => m.id).toList());

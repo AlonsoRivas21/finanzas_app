@@ -136,39 +136,15 @@ class SupabaseService {
   }
 
   static Future<void> recalcularSaldosEnSupabase(String uid) async {
+    if (uid.isEmpty || !estaAutenticado) return;
     try {
-      // 1. Obtener saldos iniciales desde la tabla 'cuentas'
-      final cuentasRes = await _client
-          .from('cuentas')
-          .select('id, saldo_inicial')
-          .eq('usuario_id', uid)
-          .eq('activa', true);
+      // Usamos el saldo ya calculado localmente en el celular.
+      final db = DatabaseHelper();
+      final saldosLocales = await db.getSaldosActualesPorId();
 
-      final saldos = <String, double>{
-        for (final row in cuentasRes as List)
-          row['id'] as String: (row['saldo_inicial'] as num?)?.toDouble() ?? 0.0
-      };
+      if (saldosLocales.isEmpty) return;
 
-      // 2. Sumar movimientos desde la nube
-      final movRes = await _client
-          .from('movimientos')
-          .select('monto, tipo, cuenta_id')
-          .eq('usuario_id', uid);
-
-      for (final row in movRes as List) {
-        final cuentaId = row['cuenta_id'] as String?;
-        if (cuentaId == null || !saldos.containsKey(cuentaId)) continue;
-        final monto  = (row['monto'] as num).toDouble();
-        final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
-        saldos[cuentaId] = (saldos[cuentaId] ?? 0) + delta;
-      }
-
-      // 3. Limpiar saldos actuales del usuario
-      await _client.from('saldos_cuentas').delete().eq('usuario_id', uid);
-
-      if (saldos.isEmpty) return;
-
-      final rows = saldos.entries.map((e) => {
+      final rows = saldosLocales.entries.map((e) => {
         'usuario_id':   uid,
         'cuenta_id':    e.key,
         'saldo_actual': e.value,
@@ -176,8 +152,10 @@ class SupabaseService {
       }).toList();
 
       await _client.from('saldos_cuentas')
-          .insert(rows);
-    } catch (_) {}
+          .upsert(rows, onConflict: 'usuario_id,cuenta_id');
+    } catch (e) {
+      print('Error en recalcularSaldosEnSupabase: $e');
+    }
   }
 
   // ── Sincronización ────────────────────────────────────────────────────────

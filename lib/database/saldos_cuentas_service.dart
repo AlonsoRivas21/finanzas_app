@@ -93,7 +93,9 @@ class SaldosCuentasService {
           saldosFinales[c['nombre'] as String] = mapSaldos[id]!;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('Error en getSaldosActuales: $e');
+    }
 
     return saldosFinales;
   }
@@ -104,6 +106,7 @@ class SaldosCuentasService {
   }
 
   static Future<void> _guardarTodos(Map<String, double> saldos) async {
+    if (_uid.isEmpty) return;
     final rows = saldos.entries.map((e) => {
       'usuario_id':   _uid,
       'cuenta_id':    e.key,
