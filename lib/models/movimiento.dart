@@ -45,24 +45,24 @@ class Movimiento {
   }
 
   factory Movimiento.fromMap(Map<String, dynamic> map) {
-    final fecha = DateTime.parse(map['fecha']);
+    final fecha = DateTime.parse(map['fecha']?.toString() ?? DateTime.now().toIso8601String());
 
     // Lógica para extraer nombres (Móvil/SQLite: categoria_nombre | Web/Supabase: categorias['nombre'])
-    String? catNombre = map['categoria_nombre'];
+    String? catNombre = map['categoria_nombre']?.toString();
     if (catNombre == null && map['categorias'] is Map) {
       catNombre = map['categorias']['nombre'];
     }
 
-    String? cueNombre = map['cuenta_nombre'];
+    String? cueNombre = map['cuenta_nombre']?.toString();
     if (cueNombre == null && map['cuentas'] is Map) {
       cueNombre = map['cuentas']['nombre'];
     }
 
     return Movimiento(
-      id: map['id'],
+      id: map['id']?.toString() ?? '',
       fecha: fecha,
-      tipo: TipoMovimiento.values.firstWhere((t) => t.name == map['tipo']),
-      monto: (map['monto'] as num).toDouble(),
+      tipo: TipoMovimiento.values.firstWhere((t) => t.name == map['tipo'], orElse: () => TipoMovimiento.egreso),
+      monto: (map['monto'] as num? ?? 0.0).toDouble(),
       categoriaId: map['categoria_id']?.toString(),
       cuentaId: map['cuenta_id']?.toString(),
       categoriaNombre: catNombre,

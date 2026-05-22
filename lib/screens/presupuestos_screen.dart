@@ -71,7 +71,9 @@ class _PresupuestosScreenState extends State<PresupuestosScreen>
 
   Future<void> _mostrarMasivo({required String tipo}) async {
     final existentes = (tipo == 'categoria' ? _porCategoria : _porCuenta)
-        .map((p) => p.nombre).toList();
+        .map((p) => p.nombre)
+        .whereType<String>()
+        .toList();
 
     final res = await showDialog<bool>(
       context: context,
@@ -244,11 +246,16 @@ class _DialogoMasivoState extends State<_DialogoMasivo> {
     final limite = double.tryParse(_limiteCtrl.text.replaceAll(',', '.')) ?? 0;
 
     try {
-      for (final nombre in _seleccionados) {
+      final catalogo = widget.tipo == 'categoria' 
+          ? await CatalogoService.getCategorias() 
+          : await CatalogoService.getCuentas();
+
+      for (final nombreSel in _seleccionados) {
+        final item = catalogo.firstWhere((e) => e['nombre'] == nombreSel);
         await PresupuestoService.guardar(
           PresupuestoService.crear(
             tipo: widget.tipo,
-            nombre: nombre,
+            categoriaId: item['id'],
             limite: limite,
             mes: widget.mes,
             anio: widget.anio,
@@ -559,9 +566,9 @@ class _PresupuestoCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(children: [
-                Icon(_icono(presupuesto.nombre), size: 16, color: color),
+                Icon(_icono(presupuesto.nombre ?? ''), size: 16, color: color),
                 const SizedBox(width: 8),
-                Text(presupuesto.nombre,
+                Text(presupuesto.nombre ?? 'Sin nombre',
                     style: const TextStyle(
                         fontWeight: FontWeight.w600, fontSize: 14)),
                 if (excedido) ...[
@@ -706,7 +713,7 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
     }
 
     _nombre = esEdicion
-        ? widget.presupuesto!.nombre
+        ? (widget.presupuesto!.nombre ?? _opciones.first)
         : _opciones.first;
     if (esEdicion) {
       _limiteCtrl.text = widget.presupuesto!.limite.toString();
@@ -728,11 +735,15 @@ class _FormPresupuestoState extends State<_FormPresupuesto> {
         double.tryParse(_limiteCtrl.text.replaceAll(',', '.')) ?? 0;
 
     try {
+      final item = (widget.tipo == 'categoria' 
+          ? await CatalogoService.getCategorias() 
+          : await CatalogoService.getCuentas()).firstWhere((e) => e['nombre'] == _nombre);
+
       await PresupuestoService.guardar(
         PresupuestoService.crear(
           id: esEdicion ? widget.presupuesto!.id : null,
           tipo:   widget.tipo,
-          nombre: _nombre,
+          categoriaId: item['id'],
           limite: limite,
           mes:    widget.mes,
           anio:   widget.anio,

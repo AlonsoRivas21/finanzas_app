@@ -102,9 +102,8 @@ class CatalogoService {
     final newNombre = (cuenta['nombre'] as String).toUpperCase();
 
     if (kIsWeb) {
-      final oldData = await _client.from('cuentas')
+      await _client.from('cuentas')
           .select('nombre').eq('id', cuenta['id']).maybeSingle();
-      final oldNombre = oldData?['nombre'] as String?;
       
       await _client.from('cuentas')
           .update({
@@ -115,10 +114,6 @@ class CatalogoService {
           })
           .eq('id', cuenta['id']);
 
-      if (oldNombre != null && oldNombre != newNombre) {
-        await _client.from('saldos_cuentas').update({'cuenta': newNombre})
-            .eq('usuario_id', _uid).eq('cuenta', oldNombre);
-      }
       // Recalcular saldos en la nube tras modificar el saldo inicial o el nombre
       await SupabaseService.recalcularSaldosEnSupabase(_uid);
     } else {
@@ -202,9 +197,8 @@ class CatalogoService {
     final newNombre = (cat['nombre'] as String).toUpperCase();
 
     if (kIsWeb) {
-      final oldData = await _client.from('categorias')
+      await _client.from('categorias')
           .select('nombre').eq('id', cat['id']).maybeSingle();
-      final oldNombre = oldData?['nombre'] as String?;
 
       await _client.from('categorias')
           .update({
@@ -215,11 +209,10 @@ class CatalogoService {
           })
           .eq('id', cat['id']);
 
-      if (oldNombre != null && oldNombre != newNombre) {
-        await _client.from('movimientos').update({'categoria': newNombre})
-            .eq('usuario_id', _uid).eq('categoria', oldNombre);
-      }
-    } else {
+      // No es necesario actualizar 'movimientos' por nombre, ya que se vinculan por categoria_id.
+      // El cambio de nombre se reflejará automáticamente en los JOINs.
+    }
+    else {
       final db = DatabaseHelper();
       await db.updateCategoria({
         ...cat,
@@ -246,21 +239,6 @@ class CatalogoService {
     // Cuentas
     final cuentasPend = await db.getCuentasNoSincronizadas();
     if (cuentasPend.isNotEmpty) {
-      // Verificar cambios de nombre antes del upsert para no perder historial en nube
-      for (final c in cuentasPend) {
-        final cloudData = await _client.from('cuentas')
-            .select('nombre').eq('id', c['id']).maybeSingle();
-        final oldNameCloud = cloudData?['nombre'] as String?;
-        final newNameLocal = (c['nombre'] as String).toUpperCase();
-
-        if (oldNameCloud != null && oldNameCloud != newNameLocal) {
-          await _client.from('movimientos').update({'cuenta': newNameLocal})
-              .eq('usuario_id', _uid).eq('cuenta', oldNameCloud);
-          await _client.from('saldos_cuentas').update({'cuenta': newNameLocal})
-              .eq('usuario_id', _uid).eq('cuenta', oldNameCloud);
-        }
-      }
-
       final rows = cuentasPend.map((c) {
         final map = Map<String, dynamic>.from(c);
         map['usuario_id'] = _uid;
@@ -284,19 +262,8 @@ class CatalogoService {
 
     // Categorías
     final catsPend = await db.getCategoriasNoSincronizadas();
-    if (catsPend.isNotEmpty) {
-      for (final c in catsPend) {
-        final cloudData = await _client.from('categorias')
-            .select('nombre').eq('id', c['id']).maybeSingle();
-        final oldNameCloud = cloudData?['nombre'] as String?;
-        final newNameLocal = (c['nombre'] as String).toUpperCase();
-
-        if (oldNameCloud != null && oldNameCloud != newNameLocal) {
-          await _client.from('movimientos').update({'categoria': newNameLocal})
-              .eq('usuario_id', _uid).eq('categoria', oldNameCloud);
-        }
-      }
-
+    if (catsPend.isNotEmpty) { // No es necesario actualizar 'movimientos' por nombre.
+      // El cambio de nombre se reflejará automáticamente en los JOINs.
       final rows = catsPend.map((c) {
         final map = Map<String, dynamic>.from(c);
         map['usuario_id'] = _uid;

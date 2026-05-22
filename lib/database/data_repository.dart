@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
 import 'database_helper.dart';
 import 'saldos_service.dart';
+import 'catalogo_service.dart';
 
 class DataRepository {
   static final DataRepository _instance = DataRepository._internal();
@@ -147,31 +148,32 @@ class DataRepository {
   }
 
   /// Aplica un delta al saldo_actual de una cuenta en saldos_cuentas
-  Future<void> _aplicarDeltaSaldo(String cuenta, double delta) async {
+  Future<void> _aplicarDeltaSaldo(String cuentaId, double delta) async {
     try {
       // Leer saldo actual
       final res = await _client
           .from('saldos_cuentas')
           .select('saldo_actual')
           .eq('usuario_id', _uid)
-          .eq('cuenta', cuenta)
+          .eq('cuenta_id', cuentaId)
           .maybeSingle();
 
       double saldoActual;
       if (res == null) {
         // No existe — partir del saldo inicial
-        final iniciales = await SaldosService.getSaldosIniciales();
-        saldoActual = iniciales[cuenta] ?? 0;
+        final cuentas = await CatalogoService.getCuentas();
+        final c = cuentas.firstWhere((e) => e['id'] == cuentaId, orElse: () => {});
+        saldoActual = (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0;
       } else {
         saldoActual = (res['saldo_actual'] as num).toDouble();
       }
 
       await _client.from('saldos_cuentas').upsert({
         'usuario_id':   _uid,
-        'cuenta':       cuenta,
+        'cuenta_id':    cuentaId,
         'saldo_actual': saldoActual + delta,
         'updated_at':   DateTime.now().toIso8601String(),
-      }, onConflict: 'usuario_id,cuenta');
+      }, onConflict: 'usuario_id,cuenta_id');
     } catch (_) {}
   }
 
@@ -228,13 +230,13 @@ class DataRepository {
     try {
       final res = await _client
           .from('saldos_cuentas')
-          .select('cuenta, saldo_actual')
+          .select('cuenta_id, saldo_actual, cuentas(nombre)')
           .eq('usuario_id', _uid);
 
       if ((res as List).isNotEmpty) {
         for (final row in res) {
-          final nombre = row['cuenta'] as String;
-          if (saldos.containsKey(nombre)) {
+          final nombre = row['cuentas']?['nombre'] as String?;
+          if (nombre != null && saldos.containsKey(nombre)) {
             saldos[nombre] = (row['saldo_actual'] as num).toDouble();
           }
         }

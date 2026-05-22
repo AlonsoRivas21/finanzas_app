@@ -79,13 +79,13 @@ class SupabaseService {
     try {
       final res = await _client
           .from('saldos_cuentas')
-          .select('cuenta, saldo_actual')
+          .select('cuenta_id, saldo_actual')
           .eq('usuario_id', usuarioActual!.id);
 
       if ((res as List).isNotEmpty) {
         final saldos = <String, double>{
           for (final row in res)
-            row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
+            row['cuenta_id'] as String: (row['saldo_actual'] as num).toDouble()
         };
         await DatabaseHelper().guardarSaldosDesdeNube(saldos);
       }
@@ -140,28 +140,27 @@ class SupabaseService {
       // 1. Obtener saldos iniciales desde la tabla 'cuentas'
       final cuentasRes = await _client
           .from('cuentas')
-          .select('nombre, saldo_inicial')
+          .select('id, saldo_inicial')
           .eq('usuario_id', uid)
           .eq('activa', true);
 
       final saldos = <String, double>{
         for (final row in cuentasRes as List)
-          row['nombre'] as String: (row['saldo_inicial'] as num?)?.toDouble() ?? 0.0
+          row['id'] as String: (row['saldo_inicial'] as num?)?.toDouble() ?? 0.0
       };
 
       // 2. Sumar movimientos desde la nube
       final movRes = await _client
           .from('movimientos')
-          .select('monto, tipo, cuentas(nombre)')
+          .select('monto, tipo, cuenta_id')
           .eq('usuario_id', uid);
 
       for (final row in movRes as List) {
-        final cuenta = row['cuentas']?['nombre'] as String?;
-        if (cuenta == null) continue;
-        if (!saldos.containsKey(cuenta)) continue;
+        final cuentaId = row['cuenta_id'] as String?;
+        if (cuentaId == null || !saldos.containsKey(cuentaId)) continue;
         final monto  = (row['monto'] as num).toDouble();
         final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
-        saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+        saldos[cuentaId] = (saldos[cuentaId] ?? 0) + delta;
       }
 
       // 3. Limpiar saldos actuales del usuario
@@ -171,7 +170,7 @@ class SupabaseService {
 
       final rows = saldos.entries.map((e) => {
         'usuario_id':   uid,
-        'cuenta':       e.key,
+        'cuenta_id':    e.key,
         'saldo_actual': e.value,
         'updated_at':   DateTime.now().toIso8601String(),
       }).toList();

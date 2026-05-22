@@ -20,7 +20,7 @@ class DatabaseHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, AppConfig.dbName);
-    return openDatabase(path, version: 7,
+    return openDatabase(path, version: 9,
         onCreate: _onCreate, onUpgrade: _onUpgrade);
   }
 
@@ -49,9 +49,10 @@ class DatabaseHelper {
     ''');
     await db.execute('''
       CREATE TABLE saldos_cuentas (
-        cuenta TEXT PRIMARY KEY,
+        cuenta_id TEXT PRIMARY KEY,
         saldo_actual REAL NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (cuenta_id) REFERENCES cuentas (id)
       )
     ''');
     await db.execute('''
@@ -84,6 +85,23 @@ class DatabaseHelper {
     ''');
     await db.execute('''
       CREATE TABLE categorias_eliminadas (
+        id TEXT PRIMARY KEY,
+        eliminado_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE presupuestos (
+        id TEXT PRIMARY KEY,
+        tipo TEXT NOT NULL,
+        categoria_id TEXT NOT NULL,
+        limite REAL NOT NULL,
+        mes INTEGER NOT NULL,
+        anio INTEGER NOT NULL,
+        sincronizado INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE presupuestos_eliminados (
         id TEXT PRIMARY KEY,
         eliminado_at TEXT NOT NULL
       )
@@ -159,6 +177,7 @@ class DatabaseHelper {
       // Migración para usar IDs como llaves en lugar de nombres
       try {
         await db.execute('ALTER TABLE movimientos ADD COLUMN cuenta_id TEXT');
+      // ignore: avoid_print
       } catch (e) { print('Migración: cuenta_id ya existe o falló: $e'); }
       
       try {
@@ -225,28 +244,101 @@ class DatabaseHelper {
         await txn.execute('CREATE INDEX idx_cuenta_id ON movimientos(cuenta_id)');
       });
     }
+
+    if (oldVersion < 8) {
+      // MIGRACIÓN: Recreación de saldos_cuentas para usar IDs
+      await db.transaction((txn) async {
+        await txn.execute('''
+          CREATE TABLE saldos_cuentas_nuevo (
+            cuenta_id TEXT PRIMARY KEY,
+            saldo_actual REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (cuenta_id) REFERENCES cuentas (id)
+          )
+        ''');
+
+        await txn.execute('''
+          INSERT INTO saldos_cuentas_nuevo (cuenta_id, saldo_actual, updated_at)
+          SELECT c.id, s.saldo_actual, s.updated_at
+          FROM saldos_cuentas s
+          INNER JOIN cuentas c ON UPPER(c.nombre) = UPPER(s.cuenta)
+        ''');
+
+        await txn.execute('DROP TABLE saldos_cuentas');
+        await txn.execute('ALTER TABLE saldos_cuentas_nuevo RENAME TO saldos_cuentas');
+      });
+    }
+
+    if (oldVersion < 9) {
+      // MIGRACIÓN: Creación o Refactorización de presupuestos
+      await db.transaction((txn) async {
+        // 1. Crear tabla con la nueva estructura
+        await txn.execute('''
+          CREATE TABLE IF NOT EXISTS presupuestos_nuevo (
+            id TEXT PRIMARY KEY,
+            tipo TEXT NOT NULL,
+            categoria_id TEXT NOT NULL,
+            limite REAL NOT NULL,
+            mes INTEGER NOT NULL,
+            anio INTEGER NOT NULL,
+            sincronizado INTEGER NOT NULL DEFAULT 0
+          )
+        ''');
+
+        // 2. Si la tabla ya existía, intentamos migrar los datos mapeando nombres a IDs
+        final tables = await txn.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='presupuestos'");
+        
+        if (tables.isNotEmpty) {
+          // Intentamos detectar si existe la columna 'categoria' (texto) para migrar
+          final columns = await txn.rawQuery("PRAGMA table_info(presupuestos)");
+          final tieneColumnaVieja = columns.any((c) => c['name'] == 'categoria' || c['name'] == 'nombre');
+          final nombreCol = columns.any((c) => c['name'] == 'categoria') ? 'categoria' : 'nombre';
+
+          if (tieneColumnaVieja) {
+            await txn.execute('''
+              INSERT INTO presupuestos_nuevo (id, tipo, categoria_id, limite, mes, anio, sincronizado)
+              SELECT 
+                p.id, p.tipo,
+                CASE 
+                  WHEN p.tipo = 'categoria' 
+                    THEN COALESCE((SELECT id FROM categorias WHERE UPPER(nombre) = UPPER(p.$nombreCol) LIMIT 1), 'error_id')
+                  ELSE 
+                    COALESCE((SELECT id FROM cuentas WHERE UPPER(nombre) = UPPER(p.$nombreCol) LIMIT 1), 'error_id')
+                END,
+                p.limite, p.mes, p.anio, p.sincronizado
+              FROM presupuestos p
+            ''');
+          }
+          await txn.execute('DROP TABLE presupuestos');
+        }
+
+        await txn.execute('ALTER TABLE presupuestos_nuevo RENAME TO presupuestos');
+        
+        await txn.execute('''
+          CREATE TABLE IF NOT EXISTS presupuestos_eliminados (
+            id TEXT PRIMARY KEY,
+            eliminado_at TEXT NOT NULL
+          )
+        ''');
+      });
+    }
   }
 
   // ── Saldos cuentas (delta) ────────────────────────────────────────────────
 
   Future<void> aplicarDeltaSaldoPorId(String cuentaId, double delta) async {
     final database = await db;
-    // Obtener el nombre de la cuenta para la tabla saldos_cuentas
-    final res = await database.query('cuentas', columns: ['nombre'], where: 'id = ?', whereArgs: [cuentaId]);
-    if (res.isEmpty) return;
-    
-    final String cuentaNombre = res.first['nombre'] as String;
-    final cuentaNorm = cuentaNombre.toUpperCase();
     
     final rows = await database.query('saldos_cuentas',
-        where: 'UPPER(cuenta) = ?', whereArgs: [cuentaNorm]);
+        where: 'cuenta_id = ?', whereArgs: [cuentaId]);
 
     final saldoActual = rows.isEmpty
         ? 0.0
         : (rows.first['saldo_actual'] as num).toDouble();
 
     await database.insert('saldos_cuentas', {
-      'cuenta':       cuentaNorm,
+      'cuenta_id':    cuentaId,
       'saldo_actual': saldoActual + delta,
       'updated_at':   DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -254,16 +346,15 @@ class DatabaseHelper {
 
   Future<Map<String, double>> getSaldosActualesLocal() async {
     final database = await db;
-    // Usamos UPPER en el JOIN para que no falle si hay diferencias de casing entre tablas
     final rows = await database.rawQuery('''
-      SELECT s.cuenta, s.saldo_actual 
+      SELECT c.nombre, s.saldo_actual 
       FROM saldos_cuentas s
-      INNER JOIN cuentas c ON UPPER(s.cuenta) = UPPER(c.nombre)
+      INNER JOIN cuentas c ON s.cuenta_id = c.id
       WHERE c.activa = 1
     ''');
     return {
       for (final row in rows)
-        row['cuenta'] as String: (row['saldo_actual'] as num).toDouble()
+        row['nombre'] as String: (row['saldo_actual'] as num).toDouble()
     };
   }
 
@@ -273,26 +364,25 @@ class DatabaseHelper {
     
     // 1. Obtener saldos iniciales de cuentas activas
     final cuentas = await getCuentas();
-    final saldos = <String, double>{
+    final saldos = <String, double>{ // Mapeamos por ID internamente
       for (var c in cuentas)
-        (c['nombre'] as String? ?? ''):
+        (c['id'] as String):
             (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0
     };
 
     // 2. Sumar el neto de movimientos agrupados por cuenta y tipo
     final rows = await database.rawQuery('''
-      SELECT UPPER(c.nombre) as cuenta_norm, m.tipo, SUM(m.monto) as total
-      FROM movimientos m
-      INNER JOIN cuentas c ON m.cuenta_id = c.id
-      GROUP BY m.cuenta_id, m.tipo
+      SELECT cuenta_id, tipo, SUM(monto) as total
+      FROM movimientos
+      GROUP BY cuenta_id, tipo
     ''');
 
     for (final row in rows) {
-      final cuenta = row['cuenta_norm'] as String;
-      if (saldos.containsKey(cuenta)) {
+      final cuentaId = row['cuenta_id'] as String;
+      if (saldos.containsKey(cuentaId)) {
         final monto = (row['total'] as num).toDouble();
         final delta = row['tipo'] == 'ingreso' ? monto : -monto;
-        saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+        saldos[cuentaId] = (saldos[cuentaId] ?? 0) + delta;
       }
     }
 
@@ -301,7 +391,7 @@ class DatabaseHelper {
     batch.delete('saldos_cuentas');
     for (final entry in saldos.entries) {
       batch.insert('saldos_cuentas', {
-        'cuenta': entry.key,
+        'cuenta_id': entry.key,
         'saldo_actual': entry.value,
         'updated_at': DateTime.now().toIso8601String(),
       });
@@ -319,22 +409,22 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> setSaldoCuenta(String cuenta, double saldo) async {
+  Future<void> setSaldoCuenta(String cuentaId, double saldo) async {
     final database = await db;
     await database.insert('saldos_cuentas', {
-      'cuenta':       cuenta,
+      'cuenta_id':    cuentaId,
       'saldo_actual': saldo,
       'updated_at':   DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<void> guardarSaldosDesdeNube(Map<String, double> saldos) async {
+  Future<void> guardarSaldosDesdeNube(Map<String, double> saldosId) async {
     final database = await db;
     final batch = database.batch();
     batch.delete('saldos_cuentas'); // Limpiar antes de recibir los nuevos de la nube
-    for (final entry in saldos.entries) {
+    for (final entry in saldosId.entries) {
       batch.insert('saldos_cuentas', {
-        'cuenta':       entry.key.toUpperCase(),
+        'cuenta_id':    entry.key,
         'saldo_actual': entry.value,
         'updated_at':   DateTime.now().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -358,25 +448,8 @@ class DatabaseHelper {
 
   Future<void> updateCuenta(Map<String, dynamic> cuenta) async {
     final database = await db;
-
-    // 1. Obtener el nombre actual antes de actualizar para saber si cambió
-    final existing = await database.query('cuentas', 
-        columns: ['nombre'], where: 'id = ?', whereArgs: [cuenta['id']]);
-
     // Asegurar que el nombre en el objeto cuenta sea consistente (Mayúsculas)
     final String newNombre = (cuenta['nombre'] as String).toUpperCase();
-
-    if (existing.isNotEmpty) {
-      final oldNombre = existing.first['nombre'] as String;
-
-      if (oldNombre != newNombre) {
-        // Ya no es necesario propagar el nombre a 'movimientos' porque usamos IDs
-        // Pero sí a la tabla de saldos_cuentas que usa nombres como PK
-        await database.update('saldos_cuentas', {'cuenta': newNombre},
-            where: 'cuenta = ?', whereArgs: [oldNombre]);
-      }
-    }
-
     // Actualizar el mapa que se va a guardar para que sea consistente
     final cuentaParaGuardar = Map<String, dynamic>.from(cuenta);
     cuentaParaGuardar['nombre'] = newNombre;
