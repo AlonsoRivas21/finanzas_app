@@ -47,7 +47,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       _fecha = m.fecha;
       _montoCtrl.text = m.monto.toString();
       _comentarioCtrl.text = m.comentario ?? '';
-      if (m.categoriaNombre == 'TRANSFERENCIA') {
+      if (m.categoriaId == 'TRANSFERENCIA') {
         _modo = _ModoFormulario.transferencia;
       }
     }
@@ -76,11 +76,11 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
 
       if (esEdicion && _cuentas.isNotEmpty && _categorias.isNotEmpty) {
         _categoria = _categorias.firstWhere(
-          (c) => c.nombre == widget.movimiento!.categoriaNombre,
+          (c) => c.id == widget.movimiento!.categoriaId,
           orElse: () => _categoria!,
         );
         _cuenta = _cuentas.firstWhere(
-          (c) => c.nombre == widget.movimiento!.cuentaNombre,
+          (c) => c.id == widget.movimiento!.cuentaId,
           orElse: () => _cuenta!,
         );
       }
@@ -365,8 +365,8 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
         await prov.agregarTransferencia(
           fecha: _fecha,
           monto: monto,
-          cuentaOrigenNombre: _cuenta!.nombre,
-          cuentaDestinoNombre: _cuentaDestino!.nombre,
+          cuentaOrigenId: _cuenta!.id,
+          cuentaDestinoId: _cuentaDestino!.id,
           comentario: comentario,
         );
       } else if (esEdicion) {
@@ -374,8 +374,8 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
           fecha: _fecha,
           tipo: _tipo,
           monto: monto,
-          categoriaNombre: _categoria!.nombre,
-          cuentaNombre: _cuenta!.nombre,
+          categoriaId: _categoria!.id,
+          cuentaId: _cuenta!.id,
           comentario: comentario,
           mes: _fecha.month,
           anio: _fecha.year,
@@ -385,8 +385,8 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
           fecha: _fecha,
           tipo: _tipo,
           monto: monto,
-          categoriaNombre: _categoria!.nombre,
-          cuentaNombre: _cuenta!.nombre,
+          categoriaId: _categoria!.id,
+          cuentaId: _cuenta!.id,
           comentario: comentario,
         );
       }
@@ -490,4 +490,3 @@ class _CuentaPill extends StatelessWidget {
     );
   }
 }
-

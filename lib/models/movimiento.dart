@@ -5,8 +5,10 @@ class Movimiento {
   final DateTime fecha;
   final TipoMovimiento tipo;
   final double monto;
-  final String categoriaNombre;
-  final String cuentaNombre;
+  final String? categoriaId;
+  final String? cuentaId;
+  final String? categoriaNombre;
+  final String? cuentaNombre;
   final String? comentario;
   final int mes;
   final int anio;
@@ -17,8 +19,10 @@ class Movimiento {
     required this.fecha,
     required this.tipo,
     required this.monto,
-    required this.categoriaNombre,
-    required this.cuentaNombre,
+    this.categoriaId,
+    this.cuentaId,
+    this.categoriaNombre,
+    this.cuentaNombre,
     this.comentario,
     required this.mes,
     int? anio,
@@ -31,8 +35,8 @@ class Movimiento {
       'fecha': fecha.toIso8601String(),
       'tipo': tipo.name,
       'monto': monto,
-      'categoria': categoriaNombre,
-      'cuenta': cuentaNombre,
+      'categoria_id': categoriaId,
+      'cuenta_id': cuentaId,
       'comentario': comentario,
       'mes': mes,
       'anio': anio,
@@ -41,14 +45,28 @@ class Movimiento {
   }
 
   factory Movimiento.fromMap(Map<String, dynamic> map) {
-    final fecha = DateTime.parse(map['fecha']);
+    final fecha = DateTime.parse(map['fecha']?.toString() ?? DateTime.now().toIso8601String());
+
+    // Lógica para extraer nombres (Móvil/SQLite: categoria_nombre | Web/Supabase: categorias['nombre'])
+    String? catNombre = map['categoria_nombre']?.toString();
+    if (catNombre == null && map['categorias'] is Map) {
+      catNombre = map['categorias']['nombre'];
+    }
+
+    String? cueNombre = map['cuenta_nombre']?.toString();
+    if (cueNombre == null && map['cuentas'] is Map) {
+      cueNombre = map['cuentas']['nombre'];
+    }
+
     return Movimiento(
-      id: map['id'],
+      id: map['id']?.toString() ?? '',
       fecha: fecha,
-      tipo: TipoMovimiento.values.firstWhere((t) => t.name == map['tipo']),
-      monto: (map['monto'] as num).toDouble(),
-      categoriaNombre: map['categoria'] ?? 'INGRESOS',
-      cuentaNombre: map['cuenta'] ?? 'BILLETERA',
+      tipo: TipoMovimiento.values.firstWhere((t) => t.name == map['tipo'], orElse: () => TipoMovimiento.egreso),
+      monto: (map['monto'] as num? ?? 0.0).toDouble(),
+      categoriaId: map['categoria_id']?.toString(),
+      cuentaId: map['cuenta_id']?.toString(),
+      categoriaNombre: catNombre,
+      cuentaNombre: cueNombre,
       comentario: map['comentario'],
       mes: map['mes'],
       anio: map['anio'] ?? fecha.year,
@@ -61,6 +79,8 @@ class Movimiento {
     DateTime? fecha,
     TipoMovimiento? tipo,
     double? monto,
+    String? categoriaId,
+    String? cuentaId,
     String? categoriaNombre,
     String? cuentaNombre,
     String? comentario,
@@ -73,6 +93,8 @@ class Movimiento {
       fecha: fecha ?? this.fecha,
       tipo: tipo ?? this.tipo,
       monto: monto ?? this.monto,
+      categoriaId: categoriaId ?? this.categoriaId,
+      cuentaId: cuentaId ?? this.cuentaId,
       categoriaNombre: categoriaNombre ?? this.categoriaNombre,
       cuentaNombre: cuentaNombre ?? this.cuentaNombre,
       comentario: comentario ?? this.comentario,
@@ -82,7 +104,9 @@ class Movimiento {
     );
   }
 
-  String get categoria => categoriaNombre;
-  String get cuenta => cuentaNombre;
-}
+  // Getters auxiliares para la interfaz de usuario
+  // Priorizan el nombre descriptivo obtenido del JOIN; si no existe, devuelven un fallback.
+  String get displayCategoria => (categoriaNombre != null && categoriaNombre!.isNotEmpty) ? categoriaNombre! : 'Sin Categoría';
+  String get displayCuenta => (cuentaNombre != null && cuentaNombre!.isNotEmpty) ? cuentaNombre! : 'Sin Cuenta';
 
+}

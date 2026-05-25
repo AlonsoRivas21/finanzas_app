@@ -65,13 +65,14 @@ class MovimientosProvider extends ChangeNotifier {
     required DateTime fecha,
     required TipoMovimiento tipo,
     required double monto,
-    required String categoriaNombre,
-    required String cuentaNombre,
+    required String categoriaId,
+    required String cuentaId,
     String? comentario,
   }) async {
     final m = Movimiento(
       id: _uuid.v4(), fecha: fecha, tipo: tipo, monto: monto,
-      categoriaNombre: categoriaNombre, cuentaNombre: cuentaNombre, 
+      categoriaId: categoriaId,
+      cuentaId: cuentaId,
       comentario: comentario,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
@@ -82,20 +83,19 @@ class MovimientosProvider extends ChangeNotifier {
   Future<void> agregarTransferencia({
     required DateTime fecha,
     required double monto,
-    required String cuentaOrigenNombre,
-    required String cuentaDestinoNombre,
+    required String cuentaOrigenId,
+    required String cuentaDestinoId,
     String? comentario,
   }) async {
     final idBase = _uuid.v4();
-    final nota = comentario ?? 
-        'Transferencia $cuentaOrigenNombre → $cuentaDestinoNombre';
+    final nota = comentario ?? 'Transferencia';
 
     final egreso = Movimiento(
       id: '${idBase}_out', fecha: fecha,
       tipo: TipoMovimiento.egreso,  
       monto: monto,
-      categoriaNombre: 'TRANSFERENCIA',
-      cuentaNombre: cuentaOrigenNombre, 
+      categoriaId: 'TRANSFERENCIA',
+      cuentaId: cuentaOrigenId, 
       comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
@@ -104,8 +104,8 @@ class MovimientosProvider extends ChangeNotifier {
       id: '${idBase}_in', fecha: fecha,
       tipo: TipoMovimiento.ingreso, 
       monto: monto,
-      categoriaNombre: 'TRANSFERENCIA',
-      cuentaNombre: cuentaDestinoNombre, 
+      categoriaId: 'TRANSFERENCIA',
+      cuentaId: cuentaDestinoId, 
       comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
     );
@@ -153,4 +153,3 @@ class MovimientosProvider extends ChangeNotifier {
     return lista.length;
   }
 }
-

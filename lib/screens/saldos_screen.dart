@@ -69,13 +69,21 @@ class _SaldosScreenState extends State<SaldosScreen> {
 
       // Solo creamos un ajuste si la diferencia es significativa
       if (diferencia.abs() > 0.01) {
+        final categorias = await CatalogoService.getCategorias();
+        // Buscamos una categoría técnica o la primera disponible
+        final catId = categorias.firstWhere(
+          (cat) => cat['nombre'].toString().contains('AJUSTE') || 
+                   cat['nombre'].toString().contains('OTROS'),
+          orElse: () => categorias.first,
+        )['id'];
+
         final ajuste = Movimiento(
           id: uuid.v4(),
           fecha: ahora,
           tipo: diferencia > 0 ? TipoMovimiento.ingreso : TipoMovimiento.egreso,
           monto: diferencia.abs(),
-          categoriaNombre: 'AJUSTE',
-          cuentaNombre: nombre,
+          categoriaId: catId,
+          cuentaId: c['id'],
           comentario: 'Ajuste manual de saldo',
           mes: ahora.month,
           anio: ahora.year,

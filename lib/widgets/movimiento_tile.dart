@@ -56,15 +56,15 @@ class MovimientoTile extends StatelessWidget {
         leading: CircleAvatar(
           // ignore: deprecated_member_use
           backgroundColor: color.withOpacity(0.12),
-          child: Icon(_iconoCategoria(m.categoriaNombre), color: color, size: 20),
+          child: Icon(_iconoCategoria(m.displayCategoria), color: color, size: 20),
         ),
 
         title: Text(
-          m.categoriaNombre,
+          m.displayCategoria,
           style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
         ),
         subtitle: Text(
-          '${m.cuentaNombre}${m.comentario != null ? ' · ${m.comentario}' : ''}',
+          '${m.displayCuenta}${m.comentario != null ? ' · ${m.comentario}' : ''}',
           maxLines: 1,
 
           overflow: TextOverflow.ellipsis,

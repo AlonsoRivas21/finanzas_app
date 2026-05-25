@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
+import 'catalogo_service.dart';
 import 'database_helper.dart';
 import 'saldos_service.dart';
 // ignore: uri_does_not_exist
@@ -33,8 +34,8 @@ class ExcelExportService {
         'fecha':       row['fecha'],
         'tipo':        row['tipo'],
         'monto':       (row['monto'] as num).toDouble(),
-        'categoria':   row['categoria'],
-        'cuenta':      row['cuenta'],
+        'categoria_id': row['categoria_id'] ?? row['categoria'],
+        'cuenta_id':    row['cuenta_id'] ?? row['cuenta'],
         'comentario':  row['comentario'],
         'mes':         row['mes'],
         'anio':        row['anio'] ?? anio,
@@ -44,6 +45,12 @@ class ExcelExportService {
       movimientos = await DatabaseHelper()
           .getMovimientos(anio: anio, limit: 99999);
     }
+
+    // Obtener catálogos para mapear IDs a nombres
+    final cuentasList = await CatalogoService.getCuentas();
+    final categoriasList = await CatalogoService.getCategorias();
+    final mapaCuentas = {for (var c in cuentasList) c['id']: c['nombre'] as String};
+    final mapaCategorias = {for (var c in categoriasList) c['id']: c['nombre'] as String};
 
     final saldos = await SaldosService.getSaldosIniciales();
     final resumenCuentas = kIsWeb
@@ -82,12 +89,15 @@ class ExcelExportService {
     for (int i = 0; i < movimientos.length; i++) {
       final m = movimientos[i];
       final row = i + 3;
+      final nombreCat = mapaCategorias[m.categoriaId] ?? m.categoriaId;
+      final nombreCue = mapaCuentas[m.cuentaId] ?? m.cuentaId;
+
       _cell(registro, row, 0, fmt.format(m.fecha));
       _cell(registro, row, 1,
           m.tipo == TipoMovimiento.ingreso ? 'INGRESO' : 'EGRESO');
       _cell(registro, row, 2, m.monto);
-      _cell(registro, row, 3, m.categoriaNombre);
-      _cell(registro, row, 4, m.cuentaNombre);
+      _cell(registro, row, 3, nombreCat);
+      _cell(registro, row, 4, nombreCue);
       _cell(registro, row, 5, m.comentario ?? '');
       _cell(registro, row, 6, m.mes);
     }
@@ -108,12 +118,14 @@ class ExcelExportService {
     _headerCell(bd, 0, 4, 'SALDO REAL');
 
     int row = 1;
-for (final cuentaNombre in ['BILLETERA', 'DEBITO BA', 'DEBITO NIU', 'CREDITO BA', 'CREDITO NIU', 'MULTIMONEY']) {
+    // Usar las cuentas reales del catálogo para el resumen
+    for (final c in cuentasList) {
+      final cuentaNombre = c['nombre'] as String;
       final saldoInicial = saldos[cuentaNombre] ?? 0.0;
       final ingresos = resumenCuentas[cuentaNombre]?['ingresos'] ?? 0.0;
       final egresos  = resumenCuentas[cuentaNombre]?['egresos']  ?? 0.0;
       _cell(bd, row, 0, cuentaNombre);
-      _cell(bd, row, 1, saldoInicial);
+      _cell(bd, row, 1, (c['saldo_inicial'] as num).toDouble());
       _cell(bd, row, 2, ingresos);
       _cell(bd, row, 3, egresos);
       _cell(bd, row, 4, saldoInicial + ingresos - egresos);

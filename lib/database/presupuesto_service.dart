@@ -9,39 +9,66 @@ import 'database_helper.dart';
 class PresupuestoModel {
   final String id;
   final String tipo; // 'categoria' o 'cuenta'
-  final String nombre; // nombre de la categoría o cuenta
+  final String? categoriaId; // UUID de la categoría o cuenta
+  final String? cuentaId; // UUID de la cuenta
   final double limite;
   final int mes;
   final int anio;
   final bool sincronizado;
+  final String? nombre; // Nombre descriptivo (obtenido por join)
 
   PresupuestoModel({
     required this.id,
     required this.tipo,
-    required this.nombre,
+    this.categoriaId,
+    this.cuentaId,
     required this.limite,
     required this.mes,
     required this.anio,
     this.sincronizado = false,
+    this.nombre,
   });
 
   factory PresupuestoModel.fromMap(Map<String, dynamic> map) {
+    String? displayNombre;
+    final tipo = map['tipo']?.toString() ?? 'categoria';
+
+    // Prioridad por tipo para obtener el nombre correcto
+    if (tipo == 'categoria') {
+      if (map['categorias'] != null && map['categorias'] is Map) {
+        displayNombre = map['categorias']['nombre']?.toString();
+      } else if (map['nombre_display'] != null) {
+        displayNombre = map['nombre_display']?.toString();
+      }
+    } else if (tipo == 'cuenta') {
+      if (map['cuentas'] != null && map['cuentas'] is Map) {
+        displayNombre = map['cuentas']['nombre']?.toString();
+      } else if (map['nombre_display'] != null) {
+        displayNombre = map['nombre_display']?.toString();
+      }
+    }
+
+    displayNombre ??= 'Sin nombre'; // Fallback
+
     return PresupuestoModel(
-      id:           map['id'] as String,
-      tipo:         map['tipo'] as String? ?? 'categoria',
-      nombre:       (map['categoria'] ?? map['nombre']) as String,
-      limite:       (map['limite'] as num).toDouble(),
-      mes:          map['mes'] as int,
-      anio:         map['anio'] as int,
+      id:          map['id']?.toString() ?? '',
+      tipo:        tipo,
+      categoriaId: map['categoria_id']?.toString(),
+      cuentaId:    map['cuenta_id']?.toString(),
+      limite:       (map['limite'] as num? ?? 0.0).toDouble(),
+      mes:          map['mes'] as int? ?? 0,
+      anio:         map['anio'] as int? ?? 0,
       sincronizado: (map['sincronizado'] == 1 || map['sincronizado'] == true),
+      nombre:       displayNombre,
     );
   }
 
   Map<String, dynamic> toLocalMap() => {
     'id':           id,
     'tipo':         tipo,
-    'nombre':       nombre,
-    'limite':       limite,
+    'categoria_id': categoriaId,
+    'cuenta_id':    cuentaId,
+    'limite':     limite,
     'mes':          mes,
     'anio':         anio,
     'sincronizado': sincronizado ? 1 : 0,
@@ -50,8 +77,9 @@ class PresupuestoModel {
   Map<String, dynamic> toSupabaseMap(String userId) => {
     'id':         id,
     'usuario_id': userId,
-    'tipo':       tipo,
-    'categoria':  nombre,
+    'tipo':     tipo,
+    'categoria_id': categoriaId,
+    'cuenta_id':    cuentaId,
     'limite':     limite,
     'mes':        mes,
     'anio':       anio,
@@ -66,50 +94,48 @@ class PresupuestoService {
 
   // ── BD Local ──────────────────────────────────────────────────────────────
 
-  static Future<Database> get _db async {
-    final db = await DatabaseHelper().db;
-    // Crear tabla si no existe
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS presupuestos (
-        id TEXT PRIMARY KEY,
-        tipo TEXT NOT NULL DEFAULT 'categoria',
-        nombre TEXT NOT NULL,
-        limite REAL NOT NULL,
-        mes INTEGER NOT NULL,
-        anio INTEGER NOT NULL,
-        sincronizado INTEGER NOT NULL DEFAULT 0
-      )
-    ''');
-    return db;
-  }
+  static Future<Database> get _db => DatabaseHelper().db;
 
   static Future<List<PresupuestoModel>> getPresupuestos(
       int mes, int anio) async {
     if (kIsWeb) {
       if (!_autenticado) return [];
-      final res = await _client
+      final res = await _client // Fetch both category and account names for display
           .from('presupuestos')
-          .select()
+          .select('*, categorias(nombre), cuentas(nombre)')
           .eq('usuario_id', _uid)
           .eq('mes', mes)
           .eq('anio', anio)
           .order('tipo');
       return List<Map<String, dynamic>>.from(res as List).map(PresupuestoModel.fromMap).toList();
     }
+    // Use rawQuery with LEFT JOINs to get the display name
     final db = await _db;
-    final rows = await db.query(
-      'presupuestos',
-      where: 'mes = ? AND anio = ?',
-      whereArgs: [mes, anio],
-      orderBy: 'tipo, nombre',
-    );
-    return rows.map(PresupuestoModel.fromMap).toList();
+    final rows = await db.rawQuery('''
+      SELECT
+        p.id, p.tipo, p.categoria_id, p.cuenta_id, p.limite, p.mes, p.anio, p.sincronizado,
+        CASE
+          WHEN p.tipo = 'categoria' THEN c.nombre
+          WHEN p.tipo = 'cuenta' THEN cu.nombre
+          ELSE NULL
+        END AS nombre_display
+      FROM presupuestos AS p
+      LEFT JOIN categorias AS c ON p.categoria_id = c.id
+      LEFT JOIN cuentas AS cu ON p.cuenta_id = cu.id
+      WHERE p.mes = ? AND p.anio = ?
+      ORDER BY p.tipo
+    ''', [mes, anio]);
+
+    return rows.map((row) => PresupuestoModel.fromMap({
+      ...row,
+      'nombre_display': row['nombre_display'], // Map the joined name to 'nombre_display' for fromMap
+    })).toList();
   }
 
   static Future<void> guardar(PresupuestoModel p) async {
     if (kIsWeb) {
       await _client.from('presupuestos')
-          .upsert(p.toSupabaseMap(_uid), onConflict: 'usuario_id,tipo,categoria,mes,anio');
+          .upsert(p.toSupabaseMap(_uid), onConflict: 'id'); // Conflict target is 'id'
       return;
     }
     final db = await _db;
@@ -137,27 +163,15 @@ class PresupuestoService {
 
   static Future<List<PresupuestoModel>> getNoSincronizados() async {
     if (kIsWeb) return [];
-    final db = await _db;
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS presupuestos_eliminados (
-        id TEXT PRIMARY KEY,
-        eliminado_at TEXT NOT NULL
-      )
-    ''');
+    final db = await _db; // Rely on DatabaseHelper for table creation
     final rows = await db.query('presupuestos',
         where: 'sincronizado = ?', whereArgs: [0]);
     return rows.map(PresupuestoModel.fromMap).toList();
   }
 
   static Future<List<String>> getEliminadosPendientes() async {
-    if (kIsWeb) return [];
-    final db = await _db;
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS presupuestos_eliminados (
-        id TEXT PRIMARY KEY,
-        eliminado_at TEXT NOT NULL
-      )
-    ''');
+    if (kIsWeb) return []; // Rely on DatabaseHelper for table creation
+    final db = await _db; 
     final rows = await db.query('presupuestos_eliminados');
     return rows.map((r) => r['id'] as String).toList();
   }
@@ -190,7 +204,7 @@ class PresupuestoService {
           .map((p) => p.toSupabaseMap(_uid))
           .toList();
       await _client.from('presupuestos')
-          .upsert(rows, onConflict: 'usuario_id,tipo,categoria,mes,anio');
+          .upsert(rows, onConflict: 'id');
       await marcarSincronizados(pendientes.map((p) => p.id).toList());
     }
 
@@ -208,7 +222,7 @@ class PresupuestoService {
 
     final res = await _client
         .from('presupuestos')
-        .select()
+        .select('*, categorias(nombre), cuentas(nombre)') // Fetch both category and account names for display
         .eq('usuario_id', _uid);
 
     if ((res as List).isEmpty) return;
@@ -234,16 +248,16 @@ class PresupuestoService {
     if (kIsWeb) {
       if (!_autenticado) return {};
       final res = await _client.from('movimientos')
-          .select('categoria, monto')
+          .select('monto, categorias(nombre)')
           .eq('usuario_id', _uid)
           .eq('mes', mes)
           .eq('anio', anio)
-          .eq('tipo', 'egreso')
-          .neq('categoria', 'TRANSFERENCIA');
+          .eq('tipo', 'egreso');
           
       final map = <String, double>{};
       for (final row in res as List) {
-        final cat = row['categoria'] as String;
+        final cat = (row['categorias'] as Map)['nombre'] as String;
+        if (cat == 'TRANSFERENCIA') continue;
         final monto = (row['monto'] as num).toDouble();
         map[cat] = (map[cat] ?? 0) + monto;
       }
@@ -251,10 +265,11 @@ class PresupuestoService {
     }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
-      SELECT categoria, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
-      GROUP BY categoria
+      SELECT c.nombre as categoria, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN categorias c ON m.categoria_id = c.id
+      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso' AND c.nombre NOT IN ('TRANSFERENCIA')
+      GROUP BY c.nombre
     ''', [mes, anio]);
 
     return {
@@ -268,16 +283,15 @@ class PresupuestoService {
     if (kIsWeb) {
       if (!_autenticado) return {};
       final res = await _client.from('movimientos')
-          .select('cuenta, monto')
+          .select('monto, cuentas(nombre)')
           .eq('usuario_id', _uid)
           .eq('mes', mes)
           .eq('anio', anio)
-          .eq('tipo', 'egreso')
-          .neq('categoria', 'TRANSFERENCIA');
+          .eq('tipo', 'egreso');
 
       final map = <String, double>{};
       for (final row in res as List) {
-        final cuenta = row['cuenta'] as String;
+        final cuenta = (row['cuentas'] as Map)['nombre'] as String;
         final monto = (row['monto'] as num).toDouble();
         map[cuenta] = (map[cuenta] ?? 0) + monto;
       }
@@ -285,10 +299,11 @@ class PresupuestoService {
     }
     final db = await DatabaseHelper().db;
     final rows = await db.rawQuery('''
-      SELECT cuenta, SUM(monto) as total
-      FROM movimientos
-      WHERE mes = ? AND anio = ? AND tipo = 'egreso' AND categoria NOT IN ('TRANSFERENCIA')
-      GROUP BY cuenta
+      SELECT c.nombre as cuenta, SUM(m.monto) as total
+      FROM movimientos m
+      INNER JOIN cuentas c ON m.cuenta_id = c.id
+      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso' AND c.nombre NOT IN ('TRANSFERENCIA')
+      GROUP BY c.nombre
     ''', [mes, anio]);
 
     return {
@@ -299,7 +314,8 @@ class PresupuestoService {
 
   static PresupuestoModel crear({
     required String tipo,
-    required String nombre,
+    String? categoriaId,
+    String? cuentaId,
     required double limite,
     required int mes,
     required int anio, String? id,
@@ -307,7 +323,8 @@ class PresupuestoService {
     return PresupuestoModel(
       id:     id ?? _uuid.v4(),
       tipo:   tipo,
-      nombre: nombre,
+      categoriaId: tipo == 'categoria' ? categoriaId : null,
+      cuentaId:    tipo == 'cuenta' ? (cuentaId ?? categoriaId) : null,
       limite: limite,
       mes:    mes,
       anio:   anio,
@@ -317,15 +334,27 @@ class PresupuestoService {
 }
 
 extension _PresupuestoModelCopyWith on PresupuestoModel {
-  PresupuestoModel copyWith({bool? sincronizado}) {
+  PresupuestoModel copyWith({
+    String? id,
+    String? tipo,
+    String? categoriaId,
+    String? cuentaId,
+    double? limite,
+    int? mes,
+    int? anio,
+    bool? sincronizado,
+    String? nombre,
+  }) {
     return PresupuestoModel(
-      id:           id,
-      tipo:         tipo,
-      nombre:       nombre,
-      limite:       limite,
-      mes:          mes,
-      anio:         anio,
+      id:           id ?? this.id,
+      tipo:         tipo ?? this.tipo,
+      categoriaId:  categoriaId ?? this.categoriaId,
+      cuentaId:     cuentaId ?? this.cuentaId,
+      limite:       limite ?? this.limite,
+      mes:          mes ?? this.mes,
+      anio:         anio ?? this.anio,
       sincronizado: sincronizado ?? this.sincronizado,
+      nombre:       nombre ?? this.nombre,
     );
   }
 }

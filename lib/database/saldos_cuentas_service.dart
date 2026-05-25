@@ -2,7 +2,7 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/movimiento.dart';
-import 'saldos_service.dart';
+import 'catalogo_service.dart';
 
 class SaldosCuentasService {
   static SupabaseClient? get _clientSafe {
@@ -39,18 +39,25 @@ class SaldosCuentasService {
   static Future<void> recalcularDesdeHistorial() async {
     if (!_autenticado) return;
 
-    final saldos = await SaldosService.getSaldosIniciales();
+    // 1. Obtener cuentas para tener mapeo ID -> Saldo Inicial
+    final cuentas = await CatalogoService.getCuentas();
+    final saldos = <String, double>{
+      for (final c in cuentas)
+        c['id'] as String: (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0
+    };
 
     final res = await _client
         .from('movimientos')
-        .select('cuenta, tipo, monto')
+        .select('cuenta_id, tipo, monto')
         .eq('usuario_id', _uid);
 
     for (final row in res as List) {
-      final cuenta = (row['cuenta'] as String).toUpperCase();
+      final id = row['cuenta_id'] as String?;
+      if (id == null || !saldos.containsKey(id)) continue;
+
       final monto  = (row['monto'] as num).toDouble();
       final delta  = row['tipo'] == 'ingreso' ? monto : -monto;
-      saldos[cuenta] = (saldos[cuenta] ?? 0) + delta;
+      saldos[id] = (saldos[id] ?? 0) + delta;
     }
 
     await _guardarTodos(saldos);
@@ -58,24 +65,39 @@ class SaldosCuentasService {
 
   /// Lee saldos actuales desde Supabase (solo web o post-sincronización)
   static Future<Map<String, double>> getSaldosActuales() async {
-    final saldos = await SaldosService.getSaldosIniciales();
-    if (!_autenticado) return saldos;
+    final saldosFinales = <String, double>{};
+    final cuentas = await CatalogoService.getCuentas();
+    
+    // Valores por defecto basados en saldo inicial
+    for (var c in cuentas) {
+      saldosFinales[c['nombre'] as String] = (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    if (!_autenticado) return saldosFinales;
 
     try {
       final res = await _client
           .from('saldos_cuentas')
-          .select()
+          .select('cuenta_id, saldo_actual')
           .eq('usuario_id', _uid);
 
-      for (final row in res as List) {
-        final nombre = (row['cuenta'] as String).toUpperCase();
-        if (saldos.containsKey(nombre)) {
-          saldos[nombre] = (row['saldo_actual'] as num).toDouble();
+      final mapSaldos = {
+        for (final row in res as List)
+          row['cuenta_id'] as String: (row['saldo_actual'] as num).toDouble()
+      };
+
+      // Mapear de vuelta a nombres para la UI
+      for (var c in cuentas) {
+        final id = c['id'] as String;
+        if (mapSaldos.containsKey(id)) {
+          saldosFinales[c['nombre'] as String] = mapSaldos[id]!;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('Error en getSaldosActuales: $e');
+    }
 
-    return saldos;
+    return saldosFinales;
   }
 
   static Future<void> bajarSaldos() async {
@@ -84,14 +106,15 @@ class SaldosCuentasService {
   }
 
   static Future<void> _guardarTodos(Map<String, double> saldos) async {
+    if (_uid.isEmpty) return;
     final rows = saldos.entries.map((e) => {
       'usuario_id':   _uid,
-      'cuenta':       e.key,
+      'cuenta_id':    e.key,
       'saldo_actual': e.value,
       'updated_at':   DateTime.now().toIso8601String(),
     }).toList();
 
     await _client.from('saldos_cuentas')
-        .upsert(rows, onConflict: 'usuario_id,cuenta');
+        .upsert(rows, onConflict: 'usuario_id,cuenta_id');
   }
 }
