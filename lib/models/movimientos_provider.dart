@@ -85,6 +85,7 @@ class MovimientosProvider extends ChangeNotifier {
     required double monto,
     required String cuentaOrigenId,
     required String cuentaDestinoId,
+    required String categoriaId,
     String? comentario,
   }) async {
     final idBase = _uuid.v4();
@@ -94,7 +95,7 @@ class MovimientosProvider extends ChangeNotifier {
       id: '${idBase}_out', fecha: fecha,
       tipo: TipoMovimiento.egreso,  
       monto: monto,
-      categoriaId: 'TRANSFERENCIA',
+      categoriaId: categoriaId,
       cuentaId: cuentaOrigenId, 
       comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
@@ -104,7 +105,7 @@ class MovimientosProvider extends ChangeNotifier {
       id: '${idBase}_in', fecha: fecha,
       tipo: TipoMovimiento.ingreso, 
       monto: monto,
-      categoriaId: 'TRANSFERENCIA',
+      categoriaId: categoriaId,
       cuentaId: cuentaDestinoId, 
       comentario: nota,
       mes: fecha.month, anio: fecha.year, sincronizado: false,
