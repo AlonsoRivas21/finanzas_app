@@ -379,16 +379,26 @@ class DatabaseHelper {
 
   Future<Map<String, double>> getSaldosActualesLocal() async {
     final database = await db;
+
+    // 1. Base: todas las cuentas activas con su saldo_inicial.
+    // Así una cuenta nueva sin fila en saldos_cuentas no desaparece.
+    final cuentas = await getCuentas();
+    final result = <String, double>{
+      for (final c in cuentas)
+        c['nombre'] as String: (c['saldo_inicial'] as num?)?.toDouble() ?? 0.0
+    };
+
+    // 2. Sobreponer el caché calculado cuando exista.
     final rows = await database.rawQuery('''
       SELECT c.nombre, s.saldo_actual 
       FROM saldos_cuentas s
       INNER JOIN cuentas c ON s.cuenta_id = c.id
       WHERE c.activa = 1
     ''');
-    return {
-      for (final row in rows)
-        row['nombre'] as String: (row['saldo_actual'] as num).toDouble()
-    };
+    for (final row in rows) {
+      result[row['nombre'] as String] = (row['saldo_actual'] as num).toDouble();
+    }
+    return result;
   }
 
   Future<Map<String, double>> getSaldosActualesPorId() async {

@@ -4,7 +4,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../database/database_helper.dart';
 import '../database/catalogo_service.dart';
 import '../database/data_repository.dart';
 import '../models/movimiento.dart';
@@ -38,62 +37,82 @@ class _SaldosScreenState extends State<SaldosScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final cuentas = await CatalogoService.getCuentas();
-    final saldos  = await DatabaseHelper().getSaldosActualesLocal();
+    try {
+      final cuentas = await CatalogoService.getCuentas();
+      // Vía repositorio: SQLite offline en móvil, Supabase en web.
+      final saldos = await DataRepository().getSaldosPorCuenta();
 
-    for (final c in cuentas) {
-      final nombre = c['nombre'] as String;
-      _controllers[nombre] = TextEditingController(
-        text: saldos[nombre] == null || saldos[nombre] == 0
-            ? '' : saldos[nombre]!.toString(),
+      for (final c in cuentas) {
+        final nombre = c['nombre'] as String;
+        _controllers[nombre] = TextEditingController(
+          text: saldos[nombre]?.toString() ?? '',
+        );
+      }
+      if (!mounted) return;
+      setState(() { _cuentas = cuentas; _cargando = false; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _cuentas = []; _cargando = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Sin conexión: no se pudieron cargar los saldos'),
+            backgroundColor: Colors.red),
       );
     }
-    setState(() { _cuentas = cuentas; _cargando = false; });
   }
 
   Future<void> _guardar() async {
     setState(() => _guardando = true);
-    final repo = DataRepository();
-    final saldosActuales = await DatabaseHelper().getSaldosActualesLocal();
-    final ahora = DateTime.now();
-    const uuid = Uuid();
+    try {
+      final repo = DataRepository();
+      final saldosActuales = await repo.getSaldosPorCuenta();
+      final ahora = DateTime.now();
+      const uuid = Uuid();
 
-    for (final c in _cuentas) {
-      final nombre = c['nombre'] as String;
-      final nuevoSaldo = double.tryParse(
-              _controllers[nombre]?.text.replaceAll(',', '.') ?? '0') ??
-          0.0;
-      
-      final saldoAnterior = saldosActuales[nombre] ?? 0.0;
-      final diferencia = nuevoSaldo - saldoAnterior;
+      for (final c in _cuentas) {
+        final nombre = c['nombre'] as String;
+        final nuevoSaldo = double.tryParse(
+                _controllers[nombre]?.text.replaceAll(',', '.') ?? '0') ??
+            0.0;
 
-      // Solo creamos un ajuste si la diferencia es significativa
-      if (diferencia.abs() > 0.01) {
-        final categorias = await CatalogoService.getCategorias();
-        // Buscamos una categoría técnica o la primera disponible
-        final catId = categorias.firstWhere(
-          (cat) => cat['nombre'].toString().contains('AJUSTE') || 
-                   cat['nombre'].toString().contains('OTROS'),
-          orElse: () => categorias.first,
-        )['id'];
+        final saldoAnterior = saldosActuales[nombre] ?? 0.0;
+        final diferencia = nuevoSaldo - saldoAnterior;
 
-        final ajuste = Movimiento(
-          id: uuid.v4(),
-          fecha: ahora,
-          tipo: diferencia > 0 ? TipoMovimiento.ingreso : TipoMovimiento.egreso,
-          monto: diferencia.abs(),
-          categoriaId: catId,
-          cuentaId: c['id'],
-          comentario: 'Ajuste manual de saldo',
-          mes: ahora.month,
-          anio: ahora.year,
-          sincronizado: false,
-        );
-        await repo.insertMovimiento(ajuste);
+        // Solo creamos un ajuste si la diferencia es significativa
+        if (diferencia.abs() > 0.01) {
+          final categorias = await CatalogoService.getCategorias();
+          // Buscamos una categoría técnica o la primera disponible
+          final catId = categorias.firstWhere(
+            (cat) => cat['nombre'].toString().contains('AJUSTE') ||
+                     cat['nombre'].toString().contains('OTROS'),
+            orElse: () => categorias.first,
+          )['id'];
+
+          final ajuste = Movimiento(
+            id: uuid.v4(),
+            fecha: ahora,
+            tipo: diferencia > 0 ? TipoMovimiento.ingreso : TipoMovimiento.egreso,
+            monto: diferencia.abs(),
+            categoriaId: catId,
+            cuentaId: c['id'],
+            comentario: 'Ajuste manual de saldo',
+            mes: ahora.month,
+            anio: ahora.year,
+            sincronizado: false,
+          );
+          await repo.insertMovimiento(ajuste);
+        }
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red),
+      );
+      return;
+    } finally {
+      if (mounted) setState(() => _guardando = false);
     }
 
-    setState(() => _guardando = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
