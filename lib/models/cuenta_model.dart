@@ -18,12 +18,13 @@ class CuentaModel {
   });
 
   factory CuentaModel.fromMap(Map<String, dynamic> map) {
+    final activaRaw = map['activa'];
     return CuentaModel(
       id: map['id'] as String,
       nombre: map['nombre'] as String,
       tipo: map['tipo'] as String? ?? 'debito',
       saldoInicial: (map['saldo_inicial'] as num?)?.toDouble() ?? 0.0,
-      activa: map['activa'] as bool? ?? true,
+      activa: activaRaw is bool ? activaRaw : (activaRaw is num ? activaRaw != 0 : true),
       orden: map['orden'] as int? ?? 0,
     );
   }
@@ -57,4 +58,12 @@ class CuentaModel {
 
   bool get esTarjeta => tipo == 'credito';
   bool get esAhorro  => tipo == 'ahorro';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CuentaModel && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

@@ -18,12 +18,13 @@ class CategoriaModel {
   });
 
   factory CategoriaModel.fromMap(Map<String, dynamic> map) {
+    final activaRaw = map['activa'];
     return CategoriaModel(
       id: map['id'] as String,
       nombre: map['nombre'] as String,
       tipo: map['tipo'] as String? ?? 'egreso',
       icono: map['icono'] as String? ?? 'label',
-      activa: map['activa'] as bool? ?? true,
+      activa: activaRaw is bool ? activaRaw : (activaRaw is num ? activaRaw != 0 : true),
       orden: map['orden'] as int? ?? 0,
     );
   }
@@ -54,4 +55,12 @@ class CategoriaModel {
       orden: orden ?? this.orden,
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CategoriaModel && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

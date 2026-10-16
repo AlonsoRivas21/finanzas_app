@@ -63,24 +63,26 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
     try {
       final cuentasMaps = await CatalogoService.getCuentas();
       _cuentas = cuentasMaps.map((map) => CuentaModel.fromMap(map)).where((c) => c.activa).toList();
-
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error cargando cuentas: $e')));
+    }
+    try {
       final categoriasMaps = await CatalogoService.getCategorias();
       _categorias = categoriasMaps.map((map) => CategoriaModel.fromMap(map)).where((c) => c.activa).toList();
-
-      // Defaults if not set
-      _cuenta ??= _cuentas.isNotEmpty ? _cuentas.firstWhere((c) => c.nombre == 'BILLETERA', orElse: () => _cuentas.first) : null;
-      _cuentaDestino ??= _cuentas.isNotEmpty ? _cuentas.firstWhere((c) => c.nombre == 'DEBITO BA', orElse: () => _cuentas.first) : null;
-      _categoria ??= _categorias.isNotEmpty ? _categorias.firstWhere((c) => c.nombre == 'INGRESOS', orElse: () => _categorias.first) : null;
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error cargando categorías: $e')));
+    }
+    try {
+      // Re-resolver la selección actual por id contra las listas nuevas.
+      // Evita el crash de DropdownButton cuando el refresh crea instancias
+      // nuevas: el valor debe ser null o una instancia de items.
+      _cuenta = _resolverCuenta(_cuenta?.id) ?? _cuentaDefault('BILLETERA');
+      _cuentaDestino = _resolverCuenta(_cuentaDestino?.id) ?? _cuentaDefault('DEBITO BA');
+      _categoria = _resolverCategoria(_categoria?.id) ?? _categoriaDefault();
 
       if (esEdicion && _cuentas.isNotEmpty && _categorias.isNotEmpty) {
-        _categoria = _categorias.firstWhere(
-          (c) => c.id == widget.movimiento!.categoriaId,
-          orElse: () => _categoria!,
-        );
-        _cuenta = _cuentas.firstWhere(
-          (c) => c.id == widget.movimiento!.cuentaId,
-          orElse: () => _cuenta!,
-        );
+        _categoria = _resolverCategoria(widget.movimiento!.categoriaId) ?? _categoria;
+        _cuenta = _resolverCuenta(widget.movimiento!.cuentaId) ?? _cuenta;
 
         // Detectamos si es transferencia comparando el NOMBRE de la categoría resuelta
         if (_categoria?.nombre.toUpperCase() == 'TRANSFERENCIA') {
@@ -92,6 +94,38 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
     } finally {
       if (mounted) setState(() => _cargandoCatalogo = false);
     }
+  }
+
+  CuentaModel? _resolverCuenta(String? id) {
+    if (id == null || _cuentas.isEmpty) return null;
+    for (final c in _cuentas) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  CuentaModel? _cuentaDefault(String nombrePreferido) {
+    if (_cuentas.isEmpty) return null;
+    for (final c in _cuentas) {
+      if (c.nombre == nombrePreferido) return c;
+    }
+    return _cuentas.first;
+  }
+
+  CategoriaModel? _resolverCategoria(String? id) {
+    if (id == null || _categorias.isEmpty) return null;
+    for (final c in _categorias) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  CategoriaModel? _categoriaDefault() {
+    if (_categorias.isEmpty) return null;
+    for (final c in _categorias) {
+      if (c.nombre == 'INGRESOS') return c;
+    }
+    return _categorias.first;
   }
 
   @override
