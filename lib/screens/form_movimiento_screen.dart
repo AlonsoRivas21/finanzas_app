@@ -47,9 +47,7 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
       _fecha = m.fecha;
       _montoCtrl.text = m.monto.toString();
       _comentarioCtrl.text = m.comentario ?? '';
-      if (m.categoriaId == 'TRANSFERENCIA') {
-        _modo = _ModoFormulario.transferencia;
-      }
+      // No activamos el modo transferencia aquí porque m.categoriaId ahora es un UUID
     }
   }
 
@@ -83,6 +81,11 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
           (c) => c.id == widget.movimiento!.cuentaId,
           orElse: () => _cuenta!,
         );
+
+        // Detectamos si es transferencia comparando el NOMBRE de la categoría resuelta
+        if (_categoria?.nombre.toUpperCase() == 'TRANSFERENCIA') {
+          _modo = _ModoFormulario.transferencia;
+        }
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error cargando catálogos: $e')));
@@ -362,13 +365,39 @@ class _FormMovimientoScreenState extends State<FormMovimientoScreen> {
 
     try {
       if (_modo == _ModoFormulario.transferencia) {
-        await prov.agregarTransferencia(
-          fecha: _fecha,
-          monto: monto,
-          cuentaOrigenId: _cuenta!.id,
-          cuentaDestinoId: _cuentaDestino!.id,
-          comentario: comentario,
-        );
+        if (esEdicion) {
+          // Si editamos un movimiento que es parte de una transferencia, 
+          // debemos asegurar que el categoriaId que enviamos sea el UUID real.
+          final catTrans = _categorias.firstWhere(
+            (c) => c.nombre.toUpperCase() == 'TRANSFERENCIA',
+            orElse: () => _categoria!,
+          );
+
+          await prov.editar(widget.movimiento!.copyWith(
+            fecha: _fecha,
+            tipo: _tipo,
+            monto: monto,
+            categoriaId: catTrans.id, // Usamos el UUID de la categoría técnica
+            cuentaId: _cuenta!.id,
+            comentario: comentario,
+            mes: _fecha.month,
+            anio: _fecha.year,
+          ));
+        } else {
+          final catTrans = _categorias.firstWhere(
+            (c) => c.nombre.toUpperCase() == 'TRANSFERENCIA',
+            orElse: () => throw Exception('No se encontró la categoría "TRANSFERENCIA" en el catálogo'),
+          );
+
+          await prov.agregarTransferencia(
+            fecha: _fecha,
+            monto: monto,
+            cuentaOrigenId: _cuenta!.id,
+            cuentaDestinoId: _cuentaDestino!.id,
+            categoriaId: catTrans.id,
+            comentario: comentario,
+          );
+        }
       } else if (esEdicion) {
         await prov.editar(widget.movimiento!.copyWith(
           fecha: _fecha,

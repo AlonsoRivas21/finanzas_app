@@ -199,9 +199,9 @@ class _FiltrosRapidos extends StatelessWidget {
             padding: const EdgeInsets.only(right: 8),
             child: _Chip(
               label: c['nombre'] as String,
-              selected: prov.filtroCuenta == c['nombre'],
+              selected: prov.filtroCuenta == c['id'],
               onTap: () => prov.setFiltroCuenta(
-                  prov.filtroCuenta == c['nombre'] ? null : c['nombre'] as String),
+                  prov.filtroCuenta == c['id'] ? null : c['id'] as String),
             ),
           )),
         ],
