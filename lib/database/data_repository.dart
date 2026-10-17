@@ -208,19 +208,35 @@ class DataRepository {
         .eq('mes', mes)
         .eq('anio', anio);
 
-    double ingresos = 0, egresos = 0;
+    double ingresos = 0, egresosBrutos = 0, reembolsos = 0;
     for (final row in res as List) {
       // Manejo seguro de nulos si la categoría no existe
       final cat = (row['categorias']?['nombre'] as String? ?? '').toUpperCase().trim();
       final tipo = row['tipo'] as String;
       final monto = (row['monto'] as num).toDouble();
 
-      // Lógica unificada: excluir transferencias y sumar por tipo
-      if (cat == 'TRANSFERENCIA') continue;
-      if (tipo == 'ingreso' && cat == 'INGRESOS') ingresos += monto;
-      if (tipo == 'egreso') egresos += monto;
+      // Lógica unificada: excluir transferencias y saldos; netear reembolsos.
+      if (tipo == 'ingreso') {
+        if (cat == 'INGRESOS') {
+          ingresos += monto;
+        } else if (cat == 'TRANSFERENCIA' || cat == 'SALDO' || cat.isEmpty) {
+          continue;
+        } else {
+          reembolsos += monto; // reembolso de un gasto compartido
+        }
+      } else if (tipo == 'egreso') {
+        if (cat == 'TRANSFERENCIA') continue;
+        egresosBrutos += monto;
+      }
     }
-    return {'ingresos': ingresos, 'egresos': egresos};
+    final egresos = egresosBrutos - reembolsos;
+    return {
+      'ingresos': ingresos,
+      'egresos': egresos,
+      'egresos_brutos': egresosBrutos,
+      'reembolsos': reembolsos,
+      'balance': ingresos - egresos,
+    };
   }
 
   Future<Map<String, double>> getSaldosPorCuenta() async {
@@ -270,18 +286,25 @@ class DataRepository {
     if (!kIsWeb) return DatabaseHelper().getGastosPorCategoria(mes, anio);
 
     final res = await _client.from('movimientos')
-        .select('monto, categorias(nombre)')
+        .select('tipo, monto, categorias(nombre)')
         .eq('usuario_id', _uid)
         .eq('mes', mes)
-        .eq('anio', anio)
-        .eq('tipo', 'egreso');
+        .eq('anio', anio);
 
     final mapa = <String, double>{};
     for (final row in res as List) {
-      final cat = row['categorias']?['nombre'] ?? 'Sin categoría';
-      mapa[cat] = (mapa[cat] ?? 0) + (row['monto'] as num).toDouble();
+      final tipo = row['tipo'] as String;
+      if (tipo != 'egreso' && tipo != 'ingreso') continue;
+      final cat = (row['categorias']?['nombre'] as String? ?? 'Sin categoría');
+      final catUp = cat.toUpperCase().trim();
+      if (catUp == 'TRANSFERENCIA' || catUp == 'SALDO' || catUp == 'INGRESOS') continue;
+      final monto = (row['monto'] as num).toDouble();
+      // Reembolso (ingreso) resta del gasto de la categoría
+      mapa[cat] = (mapa[cat] ?? 0) +
+          (tipo == 'ingreso' ? -monto : monto);
     }
     return mapa.entries
+        .where((e) => e.value > 0)
         .map((e) => {'categoria': e.key, 'total': e.value})
         .toList()
       ..sort((a, b) =>
@@ -302,13 +325,18 @@ class DataRepository {
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
 
     for (final row in res as List) {
-      final cat = row['categorias']?['nombre'] ?? '';
-      if (cat == 'TRANSFERENCIA') continue;
+      final cat = ((row['categorias']?['nombre'] as String? ?? '')).toUpperCase().trim();
+      if (cat == 'TRANSFERENCIA' || cat == 'SALDO') continue;
       final dia = int.parse((row['fecha'] as String).substring(8, 10));
       final s   = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
       final monto = (row['monto'] as num).toDouble();
       if (row['tipo'] == 'ingreso') {
-        semanas[s]['ingresos'] = (semanas[s]['ingresos'] as double) + monto;
+        if (cat == 'INGRESOS') {
+          semanas[s]['ingresos'] = (semanas[s]['ingresos'] as double) + monto;
+        } else {
+          // Reembolso de un gasto compartido: resta de los egresos.
+          semanas[s]['egresos'] = (semanas[s]['egresos'] as double) - monto;
+        }
       } else {
         semanas[s]['egresos'] = (semanas[s]['egresos'] as double) + monto;
       }

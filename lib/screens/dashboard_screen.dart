@@ -256,9 +256,11 @@ class _ResumenMes extends StatelessWidget {
     return FutureBuilder<Map<String, double>>(
       future: prov.getResumenMes(),
       builder: (context, snap) {
-        final ingresos = snap.data?['ingresos'] ?? 0;
-        final egresos  = snap.data?['egresos'] ?? 0;
-        final balance  = ingresos - egresos;
+        final ingresos  = snap.data?['ingresos'] ?? 0;
+        final egresos   = snap.data?['egresos'] ?? 0;
+        final brutos    = snap.data?['egresos_brutos'] ?? 0;
+        final reembolso = snap.data?['reembolsos'] ?? 0;
+        final balance   = ingresos - egresos;
 
         return Row(children: [
           _StatCard(label: 'Ingresos',
@@ -267,7 +269,10 @@ class _ResumenMes extends StatelessWidget {
           const SizedBox(width: 8),
           _StatCard(label: 'Egresos',
               valor: '\$${fmt.format(egresos)}',
-              color: Colors.red, icon: Icons.arrow_upward),
+              color: Colors.red, icon: Icons.arrow_upward,
+              subtitulo: reembolso > 0
+                  ? 'bruto \$${fmt.format(brutos)} · reemb. \$${fmt.format(reembolso)}'
+                  : null),
           const SizedBox(width: 8),
           _StatCard(label: 'Balance',
               valor: '${balance >= 0 ? '+' : ''}\$${fmt.format(balance)}',
@@ -285,8 +290,10 @@ class _StatCard extends StatelessWidget {
   final Color color;
   final IconData icon;
   final bool bold;
+  final String? subtitulo;
   const _StatCard({required this.label, required this.valor,
-      required this.color, required this.icon, this.bold = false});
+      required this.color, required this.icon, this.bold = false,
+      this.subtitulo});
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +318,11 @@ class _StatCard extends StatelessWidget {
               fontSize: 12,
               fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
               color: color)),
+          if (subtitulo != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitulo!,
+                style: TextStyle(fontSize: 8, color: color.withOpacity(0.7))),
+          ],
         ]),
       ),
     );

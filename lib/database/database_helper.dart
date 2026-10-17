@@ -774,43 +774,53 @@ class DatabaseHelper {
 
   Future<Map<String, double>> getResumenMes(int mes, int anio) async {
   final database = await db;
-  
+
+  // Traemos los totales agrupados por tipo y categoría para poder clasificar
+  // en Dart: ingresos reales, egresos brutos y reembolsos (ingresos que NO
+  // son de la categoría INGRESOS). Los reembolsos se restan de los egresos.
   final result = await database.rawQuery('''
-    SELECT LOWER(m.tipo) as tipo, COALESCE(SUM(m.monto), 0) as total
+    SELECT LOWER(m.tipo) as tipo,
+           UPPER(TRIM(COALESCE(c.nombre, ''))) as cat,
+           COALESCE(SUM(m.monto), 0) as total
     FROM movimientos m
     LEFT JOIN categorias c ON m.categoria_id = c.id
     WHERE CAST(m.mes AS INTEGER) = CAST(? AS INTEGER)
       AND CAST(m.anio AS INTEGER) = CAST(? AS INTEGER)
-      AND (c.nombre IS NULL OR UPPER(TRIM(c.nombre)) != 'TRANSFERENCIA')
-      AND (LOWER(m.tipo) != 'ingreso' OR UPPER(TRIM(c.nombre)) = 'INGRESOS')
-    GROUP BY m.tipo
+    GROUP BY tipo, cat
   ''', [mes, anio]);
 
-  // 1. Inicializamos los valores por defecto por si el resultado viene vacío
   double ingresos = 0.0;
-  double egresos = 0.0;
+  double egresosBrutos = 0.0;
+  double reembolsos = 0.0;
 
-  // 2. Iteramos de forma segura sobre las filas devueltas
   for (var row in result) {
-    final tipo = row['tipo'] as String?;
-    final categoriaNombre = row['categoria_nombre'] as String? ?? 'INGRESOS';
-    // El truco de oro: Casteamos primero a 'num' (que acepta int y double) 
-    // y luego lo convertimos forzosamente a double.
+    final tipo  = (row['tipo'] as String?)?.toLowerCase();
+    final cat   = (row['cat'] as String?) ?? '';
     final total = (row['total'] as num?)?.toDouble() ?? 0.0;
 
-    if (tipo == 'ingreso' && categoriaNombre == 'INGRESOS') { // Asegúrate de que coincida con el texto exacto que guardas (ej. 'ingreso')
-      ingresos = total;
-    } else if (tipo == 'egreso') { // Asegúrate de que coincida con el texto exacto que guardas (ej. 'gasto' o 'egreso')
-      egresos = total;
+    if (tipo == 'ingreso') {
+      if (cat == 'INGRESOS') {
+        ingresos += total;
+      } else if (cat == 'TRANSFERENCIA' || cat == 'SALDO' || cat.isEmpty) {
+        continue; // ignora como antes
+      } else {
+        reembolsos += total; // reembolso de un gasto compartido
+      }
+    } else if (tipo == 'egreso') {
+      if (cat == 'TRANSFERENCIA') continue;
+      egresosBrutos += total;
     }
   }
 
-  // 3. Calculamos el balance neto
-  double balance = ingresos - egresos;
+  // Egresos netos = lo gastado menos lo que me reembolsaron.
+  final egresos = egresosBrutos - reembolsos;
+  final balance = ingresos - egresos;
 
   return {
     'ingresos': ingresos,
     'egresos': egresos,
+    'egresos_brutos': egresosBrutos,
+    'reembolsos': reembolsos,
     'balance': balance,
   };
   }
@@ -845,12 +855,23 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getGastosPorCategoria(
       int mes, int anio) async {
     final database = await db;
+    // Egresos menos reembolsos (ingresos de la misma categoría, que no sean
+    // transacciones técnicas). Solo se devuelven categorías con neto > 0.
     return database.rawQuery('''
-      SELECT COALESCE(c.nombre, 'Sin categoría') as categoria, SUM(m.monto) as total
-      FROM movimientos m
-      LEFT JOIN categorias c ON m.categoria_id = c.id
-      WHERE m.mes = ? AND m.anio = ? AND m.tipo = 'egreso'
-      GROUP BY categoria ORDER BY total DESC
+      SELECT categoria, egresos, reembolsos, (egresos - reembolsos) as total
+      FROM (
+        SELECT COALESCE(c.nombre, 'Sin categoría') as categoria,
+               SUM(CASE WHEN m.tipo = 'egreso' THEN m.monto ELSE 0 END) as egresos,
+               SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END) as reembolsos
+        FROM movimientos m
+        LEFT JOIN categorias c ON m.categoria_id = c.id
+        WHERE m.mes = ? AND m.anio = ?
+          AND m.tipo IN ('egreso', 'ingreso')
+          AND UPPER(TRIM(COALESCE(c.nombre, ''))) NOT IN ('TRANSFERENCIA', 'SALDO', 'INGRESOS')
+        GROUP BY categoria
+      )
+      WHERE (egresos - reembolsos) > 0
+      ORDER BY total DESC
     ''', [mes, anio]);
   }
 
@@ -858,32 +879,31 @@ class DatabaseHelper {
       int mes, int anio) async {
     final database = await db;
     final result = await database.rawQuery('''
-      SELECT
-        CASE
-          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 7  THEN 0
-          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 14 THEN 1
-          WHEN CAST(strftime('%d', m.fecha) AS INTEGER) <= 21 THEN 2
-          ELSE 3
-        END as num_semana,
-        m.tipo, SUM(m.monto) as total,
-        COALESCE(c.nombre, '') as cat_nombre
+      SELECT m.fecha, LOWER(m.tipo) as tipo, m.monto,
+             UPPER(TRIM(COALESCE(c.nombre, ''))) as cat
       FROM movimientos m
       LEFT JOIN categorias c ON m.categoria_id = c.id
       WHERE m.mes = ? AND m.anio = ?
-        AND (c.nombre IS NULL OR UPPER(TRIM(c.nombre)) NOT IN ('TRANSFERENCIA', 'SALDO'))
-      GROUP BY num_semana, m.tipo ORDER BY num_semana
     ''', [mes, anio]);
 
     final semanas = List.generate(4, (i) =>
         <String, dynamic>{'semana': i, 'ingresos': 0.0, 'egresos': 0.0});
     for (final row in result) {
-      final s     = row['num_semana'] as int;
-      final tipo  = (row['tipo'] as String).toLowerCase();
-      final total = (row['total'] as num).toDouble();
-      if (tipo == 'ingreso') {
-        semanas[s]['ingresos'] = total;
+      final cat = (row['cat'] as String?) ?? '';
+      if (cat == 'TRANSFERENCIA' || cat == 'SALDO') continue;
+      final fecha = row['fecha'] as String;
+      final dia = int.parse(fecha.substring(8, 10));
+      final s   = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
+      final monto = (row['monto'] as num).toDouble();
+      if (row['tipo'] == 'ingreso') {
+        if (cat == 'INGRESOS') {
+          semanas[s]['ingresos'] = (semanas[s]['ingresos'] as double) + monto;
+        } else {
+          // Reembolso de un gasto compartido: resta de los egresos.
+          semanas[s]['egresos'] = (semanas[s]['egresos'] as double) - monto;
+        }
       } else {
-        semanas[s]['egresos'] = total;
+        semanas[s]['egresos'] = (semanas[s]['egresos'] as double) + monto;
       }
     }
     return semanas.where((s) =>
