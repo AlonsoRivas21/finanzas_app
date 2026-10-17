@@ -131,8 +131,8 @@ class MovimientosProvider extends ChangeNotifier {
     await cargar();
   }
 
-  Future<Map<String, double>> getResumenMes() async =>
-      _repo.getResumenMes(_mesActual, _anioActual);
+  Future<Map<String, double>> getResumenMes({int? mes, int? anio}) async =>
+      _repo.getResumenMes(mes ?? _mesActual, anio ?? _anioActual);
 
   Future<Map<String, double>> getSaldosPorCuenta() async =>
       _repo.getSaldosPorCuenta();

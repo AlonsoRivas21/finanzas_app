@@ -101,6 +101,13 @@ class ResumenBar extends StatelessWidget {
               FutureBuilder<Map<String, double>>(
                 future: prov.getResumenMes(),
                 builder: (context, snapMes) {
+                  if (snapMes.hasError) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('Error al calcular el resumen',
+                          style: TextStyle(fontSize: 11, color: Colors.red)),
+                    );
+                  }
                   final ingresos = snapMes.data?['ingresos'] ?? 0;
                   final egresos  = snapMes.data?['egresos'] ?? 0;
                   final balance  = ingresos - egresos;

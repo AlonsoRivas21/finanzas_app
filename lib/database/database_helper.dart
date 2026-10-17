@@ -786,7 +786,7 @@ class DatabaseHelper {
     LEFT JOIN categorias c ON m.categoria_id = c.id
     WHERE CAST(m.mes AS INTEGER) = CAST(? AS INTEGER)
       AND CAST(m.anio AS INTEGER) = CAST(? AS INTEGER)
-    GROUP BY tipo, cat
+    GROUP BY m.tipo, cat
   ''', [mes, anio]);
 
   double ingresos = 0.0;

@@ -72,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               subtitulo: meses[prov.mesActual - 1],
             ),
             const SizedBox(height: 10),
-            const _ResumenMes(),
+            _ResumenMes(mes: prov.mesActual, anio: prov.anioActual),
             const SizedBox(height: 20),
 
             // 1. Saldos por cuenta (primero)
@@ -246,7 +246,9 @@ class _GraficoSaldosCuentas extends StatelessWidget {
 // ── Resumen del mes ───────────────────────────────────────────────────────────
 
 class _ResumenMes extends StatelessWidget {
-  const _ResumenMes();
+  final int mes;
+  final int anio;
+  const _ResumenMes({required this.mes, required this.anio});
 
   @override
   Widget build(BuildContext context) {
@@ -254,8 +256,28 @@ class _ResumenMes extends StatelessWidget {
     final fmt = NumberFormat('#,##0.00', 'es');
 
     return FutureBuilder<Map<String, double>>(
-      future: prov.getResumenMes(),
+      future: prov.getResumenMes(mes: mes, anio: anio),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return Row(children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.withOpacity(0.2)),
+                ),
+                child: Text(
+                  'Error: ${snap.error}',
+                  style: TextStyle(fontSize: 10, color: Colors.red.shade700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+          ]);
+        }
+
         final ingresos  = snap.data?['ingresos'] ?? 0;
         final egresos   = snap.data?['egresos'] ?? 0;
         final brutos    = snap.data?['egresos_brutos'] ?? 0;
@@ -483,7 +505,7 @@ class _GraficoBarrasSemanas extends StatelessWidget {
           child: SizedBox(
             height: 180,
             child: BarChart(BarChartData(
-              maxY: maxVal * 1.2,
+              maxY: maxVal > 0 ? maxVal * 1.2 : 1,
               barTouchData: BarTouchData(
                 touchTooltipData: BarTouchTooltipData(
                   getTooltipItem: (group, groupIndex, rod, rodIndex) {
@@ -513,7 +535,7 @@ class _GraficoBarrasSemanas extends StatelessWidget {
               ),
               gridData: FlGridData(
                 drawVerticalLine: false,
-                horizontalInterval: maxVal / 4,
+                horizontalInterval: maxVal > 0 ? maxVal / 4 : 1,
                 getDrawingHorizontalLine: (val) =>
                     FlLine(color: Colors.grey.shade200, strokeWidth: 1),
               ),
