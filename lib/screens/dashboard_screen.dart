@@ -284,23 +284,28 @@ class _ResumenMes extends StatelessWidget {
         final reembolso = snap.data?['reembolsos'] ?? 0;
         final balance   = ingresos - egresos;
 
-        return Row(children: [
-          _StatCard(label: 'Ingresos',
-              valor: '\$${fmt.format(ingresos)}',
-              color: Colors.green, icon: Icons.arrow_downward),
-          const SizedBox(width: 8),
-          _StatCard(label: 'Egresos',
-              valor: '\$${fmt.format(egresos)}',
-              color: Colors.red, icon: Icons.arrow_upward,
-              subtitulo: reembolso > 0
-                  ? 'bruto \$${fmt.format(brutos)} · reemb. \$${fmt.format(reembolso)}'
-                  : null),
-          const SizedBox(width: 8),
-          _StatCard(label: 'Balance',
-              valor: '${balance >= 0 ? '+' : ''}\$${fmt.format(balance)}',
-              color: balance >= 0 ? Colors.green : Colors.red,
-              icon: Icons.account_balance_wallet, bold: true),
-        ]);
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _StatCard(label: 'Ingresos',
+                  valor: '\$${fmt.format(ingresos)}',
+                  color: Colors.green, icon: Icons.arrow_downward),
+              const SizedBox(width: 8),
+              _StatCard(label: 'Egresos',
+                  valor: '\$${fmt.format(egresos)}',
+                  color: Colors.red, icon: Icons.arrow_upward,
+                  subtitulo: reembolso > 0
+                      ? 'bruto \$${fmt.format(brutos)} · reemb. \$${fmt.format(reembolso)}'
+                      : null),
+              const SizedBox(width: 8),
+              _StatCard(label: 'Balance',
+                  valor: '${balance >= 0 ? '+' : ''}\$${fmt.format(balance)}',
+                  color: balance >= 0 ? Colors.green : Colors.red,
+                  icon: Icons.account_balance_wallet, bold: true),
+            ],
+          ),
+        );
       },
     );
   }
@@ -329,23 +334,35 @@ class _StatCard extends StatelessWidget {
           // ignore: deprecated_member_use
           border: Border.all(color: color.withOpacity(0.2)),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 10, color: color)),
-          ]),
-          const SizedBox(height: 4),
-          Text(valor, style: TextStyle(
-              fontSize: 12,
-              fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-              color: color)),
-          if (subtitulo != null) ...[
-            const SizedBox(height: 2),
-            Text(subtitulo!,
-                style: TextStyle(fontSize: 8, color: color.withOpacity(0.7))),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 12, color: color),
+                const SizedBox(width: 4),
+                Text(label, style: TextStyle(fontSize: 10, color: color)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(valor,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+                    color: color)),
+            if (subtitulo != null) ...[
+              const SizedBox(height: 2),
+              Text(subtitulo!,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  style: TextStyle(
+                      fontSize: 8, color: color.withOpacity(0.7))),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
