@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'movimiento.dart';
 import '../database/data_repository.dart';
 import '../database/database_helper.dart';
+import '../database/catalogo_service.dart';
 
 class MovimientosProvider extends ChangeNotifier {
   final _repo = DataRepository();
@@ -136,6 +137,23 @@ class MovimientosProvider extends ChangeNotifier {
 
   Future<Map<String, double>> getSaldosPorCuenta() async =>
       _repo.getSaldosPorCuenta();
+
+  Future<Map<String, Map<String, double>>> getSaldosPorTipo() async {
+    final saldos = await _repo.getSaldosPorCuenta();
+    final cuentas = await CatalogoService.getCuentas();
+
+    final tipoPorNombre = <String, String>{
+      for (final c in cuentas)
+        c['nombre'] as String: (c['tipo'] as String?) ?? 'otros'
+    };
+
+    final agrupado = <String, Map<String, double>>{};
+    saldos.forEach((nombre, saldo) {
+      final tipo = tipoPorNombre[nombre] ?? 'otros';
+      agrupado.putIfAbsent(tipo, () => {})[nombre] = saldo;
+    });
+    return agrupado;
+  }
 
   Future<List<Map<String, dynamic>>> getGastosPorCategoria() async =>
       _repo.getGastosPorCategoria(_mesActual, _anioActual);

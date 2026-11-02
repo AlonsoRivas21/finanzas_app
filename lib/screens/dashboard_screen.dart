@@ -149,24 +149,38 @@ class _TituloSeccion extends StatelessWidget {
 class _GraficoSaldosCuentas extends StatelessWidget {
   const _GraficoSaldosCuentas();
 
+  static const _ordenTipos = ['debito', 'ahorro', 'efectivo', 'credito', 'otros'];
+  static const _etiquetas = {
+    'debito':   ('Débito / Efectivo', Icons.account_balance_wallet),
+    'ahorro':   ('Ahorro', Icons.savings),
+    'efectivo': ('Efectivo', Icons.payments),
+    'credito':  ('Tarjeta de Crédito', Icons.credit_card),
+    'otros':    ('Sin clasificar', Icons.help_outline),
+  };
+
   @override
   Widget build(BuildContext context) {
     final fmt = NumberFormat('#,##0.00', 'es');
 
-    return FutureBuilder<Map<String, double>>(
-      future: context.read<MovimientosProvider>().getSaldosPorCuenta(),
+    return FutureBuilder<Map<String, Map<String, double>>>(
+      future: context.read<MovimientosProvider>().getSaldosPorTipo(),
       builder: (context, snap) {
         if (!snap.hasData) {
           return const SizedBox(height: 100,
             child: Center(child: CircularProgressIndicator()));
         }
-        final saldos = snap.data!;
-
-        final maxAbs = saldos.values.fold<double>(
-            0, (m, v) => v.abs() > m ? v.abs() : m);
+        final grupos = snap.data!;
 
         // Total patrimonio
-        final total = saldos.values.fold<double>(0, (s, v) => s + v);
+        final total = grupos.values
+            .expand((g) => g.values)
+            .fold<double>(0, (s, v) => s + v);
+
+        // Orden fijo; los tipos desconocidos se muestran al final.
+        final tipos = [
+          ..._ordenTipos.where((t) => grupos[t]?.isNotEmpty ?? false),
+          ...grupos.keys.where((t) => !_ordenTipos.contains(t) && grupos[t]!.isNotEmpty),
+        ];
 
         return Container(
           padding: const EdgeInsets.all(16),
@@ -194,45 +208,83 @@ class _GraficoSaldosCuentas extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               const Divider(height: 1),
-              const SizedBox(height: 14),
-              // Barra por cuenta
-              ...saldos.entries.map((entry) {
-                final saldo = entry.value;
-                final pct = maxAbs == 0 ? 0.0 : saldo.abs() / maxAbs;
-                final color = saldo >= 0 ? Colors.green : Colors.red;
+              ...tipos.map((tipo) {
+                final cuentas = grupos[tipo]!;
+                final info = _etiquetas[tipo] ?? (tipo, Icons.account_balance_wallet);
+                final subtotal = cuentas.values.fold<double>(0, (s, v) => s + v);
+                final colorSubtotal = subtotal >= 0 ? Colors.green : Colors.red;
 
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(entry.key,
-                              style: const TextStyle(
-                                  fontSize: 12, fontWeight: FontWeight.w500)),
-                          Text(
-                            '${saldo < 0 ? '-' : ''}\$${fmt.format(saldo.abs())}',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: color),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: pct.clamp(0.0, 1.0),
-                          backgroundColor: Colors.grey.shade100,
-                          valueColor: AlwaysStoppedAnimation<Color>(color),
-                          minHeight: 6,
+                final maxAbs = cuentas.values.fold<double>(
+                    0, (m, v) => v.abs() > m ? v.abs() : m);
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 14),
+                    // Encabezado del grupo con subtotal
+                    Row(
+                      children: [
+                        Icon(info.$2, size: 14, color: Colors.grey.shade600),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(info.$1,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey.shade700)),
                         ),
-                      ),
-                    ],
-                  ),
+                        Text(
+                          '${subtotal < 0 ? '-' : ''}\$${fmt.format(subtotal.abs())}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: colorSubtotal),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Barra por cuenta
+                    ...cuentas.entries.map((entry) {
+                      final saldo = entry.value;
+                      final pct = maxAbs == 0 ? 0.0 : saldo.abs() / maxAbs;
+                      final color = saldo >= 0 ? Colors.green : Colors.red;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(entry.key,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500)),
+                                Text(
+                                  '${saldo < 0 ? '-' : ''}\$${fmt.format(saldo.abs())}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: color),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: pct.clamp(0.0, 1.0),
+                                backgroundColor: Colors.grey.shade100,
+                                valueColor: AlwaysStoppedAnimation<Color>(color),
+                                minHeight: 6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
                 );
               }),
             ],
