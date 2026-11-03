@@ -2,12 +2,13 @@
 // Versión unificada app + web
 
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
+import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
-import '../database/database_helper.dart';
 import '../database/excel_export.dart';
 
 class ExportarScreen extends StatefulWidget {
@@ -24,7 +25,11 @@ class _ExportarScreenState extends State<ExportarScreen> {
   bool _exportando = false;
   String? _rutaArchivo;
   String? _error;
+  String? _mensajeExito;
+  int _mensajeExitoId = 0;
   List<FileSystemEntity> _archivos = [];
+
+  static const int _todosLosAnios = 0;
 
   @override
   void initState() {
@@ -34,47 +39,122 @@ class _ExportarScreenState extends State<ExportarScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final anios = kIsWeb
-        ? _aniosWeb()
-        : await DatabaseHelper().getAniosDisponibles();
+
+    List<int> anios;
+    try {
+      anios = await ExcelExportService.getAniosDisponibles();
+    } catch (_) {
+      anios = [];
+    }
+    if (anios.isEmpty) anios = [DateTime.now().year];
+
     final archivos = await ExcelExportService.listarExports();
     setState(() {
-      _anios = anios.isNotEmpty ? anios : [DateTime.now().year];
-      _anioSeleccionado = _anios.first;
+      _anios = anios;
+      _anioSeleccionado = anios.first;
       _archivos = archivos;
       _cargando = false;
     });
   }
 
-  List<int> _aniosWeb() {
-    final now = DateTime.now().year;
-    return [now, now - 1, now - 2];
-  }
-
   Future<void> _exportar() async {
-    if (_anioSeleccionado == null) return;
-    setState(() { _exportando = true; _rutaArchivo = null; _error = null; });
+    if (_exportando || _anioSeleccionado == null) return;
+    setState(() {
+      _exportando = true;
+      _rutaArchivo = null;
+      _error = null;
+      _mensajeExito = null;
+    });
+
+    final anio = _anioSeleccionado == _todosLosAnios ? null : _anioSeleccionado;
 
     try {
-      final path = await ExcelExportService.exportar(_anioSeleccionado!);
+      if (kIsWeb) {
+        final filename = ExcelExportService.nombreArchivo(anio);
+        final destino = await ExcelExportService.elegirDestinoWeb(filename);
+        if (!mounted) return;
+
+        if (destino == 'cancelled') {
+          setState(() => _exportando = false);
+          return;
+        }
+
+        if (destino == 'picked') {
+          ExcelExportResult result;
+          try {
+            result = await ExcelExportService.generar(anio: anio);
+          } catch (_) {
+            ExcelExportService.cancelarDestinoWeb();
+            rethrow;
+          }
+
+          final escrito =
+              await ExcelExportService.escribirDestinoWeb(result.bytes);
+          if (escrito == 'saved') {
+            _mostrarExitoTemporal('Archivo guardado: ${result.filename}');
+          } else {
+            ExcelExportService.descargarEnWeb(result);
+            _mostrarExitoTemporal('Descarga iniciada: ${result.filename}');
+          }
+          return;
+        }
+
+        // Picker no disponible o con error: descarga normal.
+        final result = await ExcelExportService.generar(anio: anio);
+        ExcelExportService.descargarEnWeb(result);
+        _mostrarExitoTemporal('Descarga iniciada: ${result.filename}');
+        return;
+      }
+
+      final result = await ExcelExportService.generar(anio: anio);
+
+      final destino = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar Excel',
+        fileName: result.filename,
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        bytes: result.bytes,
+      );
+
+      if (destino == null) {
+        // El usuario canceló el diálogo.
+        setState(() => _exportando = false);
+        return;
+      }
+
+      // En escritorio file_picker solo devuelve la ruta: escribimos los bytes.
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(destino).writeAsBytes(result.bytes, flush: true);
+      }
+
+      final copia = await ExcelExportService.guardarCopiaLocal(result);
       final archivos = await ExcelExportService.listarExports();
+
       setState(() {
-        _rutaArchivo = path;
+        _rutaArchivo = copia;
         _archivos = archivos;
+      });
+      _mostrarExitoTemporal(
+          'Archivo guardado. También creamos una copia para compartir.');
+    } catch (e) {
+      setState(() {
+        _error = 'Error al exportar: $e';
         _exportando = false;
       });
-
-      if (kIsWeb && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Descargando finanzas_$_anioSeleccionado.xlsx...'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() { _error = 'Error al exportar: $e'; _exportando = false; });
     }
+  }
+
+  void _mostrarExitoTemporal(String mensaje) {
+    final id = ++_mensajeExitoId;
+    if (!mounted) return;
+    setState(() {
+      _mensajeExito = mensaje;
+      _exportando = false;
+    });
+    Future.delayed(const Duration(seconds: 4), () {
+      if (!mounted || id != _mensajeExitoId) return;
+      setState(() => _mensajeExito = null);
+    });
   }
 
   Future<void> _eliminar(String path) async {
@@ -82,7 +162,7 @@ class _ExportarScreenState extends State<ExportarScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar archivo'),
-        content: Text('¿Eliminar ${path.split('/').last}?'),
+        content: Text('¿Eliminar ${p.basename(path)}?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
@@ -124,8 +204,8 @@ class _ExportarScreenState extends State<ExportarScreen> {
                     Expanded(
                       child: Text(
                         kIsWeb
-                            ? 'El archivo se descargará directo a tu carpeta de Descargas.'
-                            : 'Los archivos se guardan en:\nDescargas / FinanzasApp',
+                            ? 'En Chrome/Edge podrás elegir dónde guardarlo. En otros navegadores se descargará a tu carpeta de Descargas.'
+                            : 'Se abrirá el diálogo Guardar como para elegir la carpeta (Descargas, Drive, etc.).',
                         style: TextStyle(
                             fontSize: 13, color: Colors.blue.shade800),
                       ),
@@ -144,14 +224,18 @@ class _ExportarScreenState extends State<ExportarScreen> {
                   initialValue: _anioSeleccionado,
                   decoration: const InputDecoration(
                       border: OutlineInputBorder()),
-                  items: _anios
-                      .map((a) => DropdownMenuItem(
-                          value: a, child: Text('$a')))
-                      .toList(),
+                  items: [
+                    const DropdownMenuItem<int>(
+                        value: _todosLosAnios,
+                        child: Text('Todos los años')),
+                    ..._anios.map((a) => DropdownMenuItem(
+                        value: a, child: Text('$a'))),
+                  ],
                   onChanged: (v) => setState(() {
                     _anioSeleccionado = v;
                     _rutaArchivo = null;
                     _error = null;
+                    _mensajeExito = null;
                   }),
                 ),
                 const SizedBox(height: 16),
@@ -166,7 +250,9 @@ class _ExportarScreenState extends State<ExportarScreen> {
                       : const Icon(Icons.download),
                   label: Text(_exportando
                       ? 'Generando...'
-                      : 'Exportar $_anioSeleccionado'),
+                      : _anioSeleccionado == _todosLosAnios
+                          ? 'Exportar todo el historial'
+                          : 'Exportar $_anioSeleccionado'),
                   style: FilledButton.styleFrom(
                       padding: const EdgeInsets.all(16)),
                 ),
@@ -185,8 +271,8 @@ class _ExportarScreenState extends State<ExportarScreen> {
                   ),
                 ],
 
-                // Éxito en app
-                if (_rutaArchivo != null && !kIsWeb) ...[
+                // Éxito
+                if (_mensajeExito != null) ...[
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -200,14 +286,37 @@ class _ExportarScreenState extends State<ExportarScreen> {
                           color: Colors.green),
                       const SizedBox(width: 8),
                       Expanded(
+                        child: Text(_mensajeExito!,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.green.shade700)),
+                      ),
+                    ]),
+                  ),
+                ],
+
+                // Copia local para abrir/compartir (solo app)
+                if (_rutaArchivo != null && !kIsWeb) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.table_chart, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Archivo generado',
+                            Text('Copia para compartir',
                                 style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     color: Colors.green.shade700)),
-                            Text(_rutaArchivo!.split('/').last,
+                            Text(p.basename(_rutaArchivo!),
                                 style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.green.shade600)),
@@ -259,7 +368,7 @@ class _ExportarScreenState extends State<ExportarScreen> {
                     ),
                     child: Column(
                       children: _archivos.map((f) {
-                        final nombre = f.path.split('/').last;
+                        final nombre = p.basename(f.path);
                         final stat   = File(f.path).statSync();
                         final fecha  = DateFormat('dd/MM/yyyy HH:mm')
                             .format(stat.modified);
