@@ -595,16 +595,13 @@ class ExcelExportService {
     if (kIsWeb) throw UnsupportedError('getExportDir no aplica en web');
 
     if (Platform.isAndroid) {
-      final downloads = Directory('/storage/emulated/0/Download/FinanzasApp');
-      try {
-        if (!downloads.existsSync()) downloads.createSync(recursive: true);
-        final test = File(p.join(downloads.path, '.test'));
-        test.writeAsBytesSync([]);
-        test.deleteSync();
-        return downloads;
-      } catch (_) {
-        // Android 11+ bloquea esta ruta: se usa la carpeta de la app.
-      }
+      // En Android 11+ no se puede escribir directamente en Downloads.
+      // Usamos el almacenamiento externo propio de la app (sin permisos).
+      final base = await getExternalStorageDirectory() ??
+          await getApplicationDocumentsDirectory();
+      final dir = Directory(p.join(base.path, 'FinanzasApp'));
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      return dir;
     }
 
     try {

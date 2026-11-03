@@ -3,8 +3,9 @@
 
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
@@ -48,7 +49,14 @@ class _ExportarScreenState extends State<ExportarScreen> {
     }
     if (anios.isEmpty) anios = [DateTime.now().year];
 
-    final archivos = await ExcelExportService.listarExports();
+    List<FileSystemEntity> archivos;
+    try {
+      archivos = await ExcelExportService.listarExports();
+    } catch (e) {
+      debugPrint('No se pudieron listar los archivos exportados: $e');
+      archivos = [];
+    }
+
     setState(() {
       _anios = anios;
       _anioSeleccionado = anios.first;
@@ -127,21 +135,50 @@ class _ExportarScreenState extends State<ExportarScreen> {
         await File(destino).writeAsBytes(result.bytes, flush: true);
       }
 
-      final copia = await ExcelExportService.guardarCopiaLocal(result);
-      final archivos = await ExcelExportService.listarExports();
+      String? copia;
+      try {
+        copia = await ExcelExportService.guardarCopiaLocal(result);
+      } catch (e) {
+        debugPrint('No se pudo crear la copia local del Excel: $e');
+      }
+
+      List<FileSystemEntity> archivos = _archivos;
+      try {
+        archivos = await ExcelExportService.listarExports();
+      } catch (e) {
+        debugPrint('No se pudieron listar los archivos exportados: $e');
+      }
 
       setState(() {
         _rutaArchivo = copia;
         _archivos = archivos;
       });
-      _mostrarExitoTemporal(
-          'Archivo guardado. También creamos una copia para compartir.');
+      _mostrarExitoTemporal(copia == null
+          ? 'Archivo guardado.'
+          : 'Archivo guardado. También creamos una copia para compartir.');
     } catch (e) {
       setState(() {
-        _error = 'Error al exportar: $e';
+        _error = _mensajeErrorExportacion(e);
         _exportando = false;
       });
     }
+  }
+
+  String _mensajeErrorExportacion(Object e) {
+    debugPrint('Error al exportar: $e');
+
+    if (e is PathAccessException || e is FileSystemException) {
+      return 'No se pudo guardar el archivo. Verifica el espacio disponible e inténtalo de nuevo.';
+    }
+    if (e is SocketException ||
+        e.toString().contains('Failed host lookup') ||
+        e.toString().contains('SocketException')) {
+      return 'No hay conexión a internet. Inténtalo de nuevo.';
+    }
+    if (e is PlatformException) {
+      return 'No se pudo abrir el selector de archivos. Inténtalo de nuevo.';
+    }
+    return 'No se pudo exportar. Inténtalo de nuevo.';
   }
 
   void _mostrarExitoTemporal(String mensaje) {
